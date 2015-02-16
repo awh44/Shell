@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
 			size_t argc = 0;
 			int background;
 			int error = parse_line(line, chars_read, &arguments, &argc, &background);
-			if (error == SUCCESS)
+			if (error != SUCCESS)
 			{
 				handle_error(error);
 			}
