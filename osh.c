@@ -12,19 +12,32 @@
 
 #define HISTORY_LENGTH 10
 
+#define MIN(a, b) (a) < (b) ? (a) : (b)
+
 typedef int status_code;
 typedef struct
 {
-	uintmax_t number;
+	size_t number;
 	char **arguments;
+	size_t argc;
+	unsigned short background;
 } command_t;
 
-unsigned short eval_print(char *line, size_t size, command_t *history, uintmax_t *num_commands);
-status_code parse_line(char *line, size_t chars_read, char ***arguments, int *background);
+typedef struct
+{
+	command_t commands[HISTORY_LENGTH];
+	size_t num_commands;
+} history_t;
+
+unsigned short eval_print(char *line, size_t size, history_t *history);
+status_code parse_line(char *line, size_t chars_read, char ***arguments, size_t *argc, unsigned short *background);
 void trim(char *line, size_t length);
 char **split(char *s, char delim, size_t *number);
-status_code execute(char **arguments, int background);
-void add_to_history(command_t *history, uintmax_t *num_commands, char **arguments);
+status_code execute(char **arguments, unsigned short background);
+void add_to_history(history_t *history, char **arguments, size_t argc, unsigned short background);
+void clear_history_entry(history_t *history, size_t index);
+void clear_history(history_t *history);
+void print_history(history_t *history);
 void handle_error(status_code error_code);
 
 int main(int argc, char *argv[])
@@ -32,8 +45,7 @@ int main(int argc, char *argv[])
 	int cont = 1;
 	char *line = NULL;
 	size_t size;
-	uintmax_t num_commands;
-	command_t history[HISTORY_LENGTH] = {0};
+	history_t history = {0};
 
 	while (cont)
 	{
@@ -46,24 +58,38 @@ int main(int argc, char *argv[])
 		}
 		else
 		{
-			cont = eval_print(line, chars_read, history, &num_commands);
+			cont = eval_print(line, chars_read, &history);
 		}
 	}
 
 	free(line);
+	clear_history(&history);
 	return 0;
 }
 
-unsigned short eval_print(char *line, size_t chars_read, command_t *history, uintmax_t *num_commands)
+unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 {
 	if (strcmp(line, "exit\n") == 0)
 	{
 		return 0;
 	}
+	else if (strcmp(line, "history\n") == 0)
+	{
+		print_history(history);
+		return 1;
+	}
+	else if (strcmp(line, "!!\n") == 0 && history->num_commands > 0)
+	{
+		command_t command = history->commands[(history->num_commands - 1) % HISTORY_LENGTH];
+		execute(command.arguments, command.background);
+		add_to_history(history, command.arguments, command.argc, command.background);
+		return 1;
+	}
 
 	char **arguments = NULL;
-	int background;
-	status_code error = parse_line(line, chars_read, &arguments, &background);
+	size_t argc = 0;
+	unsigned short background;
+	status_code error = parse_line(line, chars_read, &arguments, &argc, &background);
 	if (error != SUCCESS)
 	{
 		handle_error(error);
@@ -77,6 +103,7 @@ unsigned short eval_print(char *line, size_t chars_read, command_t *history, uin
 		handle_error(error);
 		free(arguments);
 		free(line);
+		clear_history(history);
 		exit(1);
 	}
 	else if (error != SUCCESS)
@@ -84,8 +111,7 @@ unsigned short eval_print(char *line, size_t chars_read, command_t *history, uin
 		handle_error(error);
 	}
 
-	(*num_commands)++;
-	add_to_history(history, num_commands, arguments);
+	add_to_history(history, arguments, argc, background);
 
 	//arguments must either be NULL or must not have been freed by one of the subsequently
 	//called functions, so safe to just free it here.	
@@ -93,7 +119,7 @@ unsigned short eval_print(char *line, size_t chars_read, command_t *history, uin
 	return 1;
 }
 
-status_code parse_line(char *line, size_t chars_read, char*** arguments, int *background)
+status_code parse_line(char *line, size_t chars_read, char*** arguments, size_t *argc, unsigned short *background)
 {
 	//handle case of empty line
 	if (chars_read <= 1)
@@ -109,8 +135,7 @@ status_code parse_line(char *line, size_t chars_read, char*** arguments, int *ba
 	trim(line, chars_read);
 
 	//split the line into the arguments array
-	size_t argc;
-	*arguments = split(line, ' ', &argc);
+	*arguments = split(line, ' ', argc);
 	if (*arguments == NULL)
 	{
 		return MEMORY_ERROR;
@@ -118,22 +143,22 @@ status_code parse_line(char *line, size_t chars_read, char*** arguments, int *ba
 	
 	//determine if the process should be run in the background
 	*background = 0;
-	if (strcmp((*arguments)[argc - 1], "&") == 0)
+	if (strcmp((*arguments)[*argc - 1], "&") == 0)
 	{
 		*background = 1;
-		argc--;
-		(*arguments)[argc] = NULL;
+		(*arguments)[*argc - 1] = NULL;
 	}
 	else
 	{
-		char **tmp = realloc(*arguments, (argc + 1) * sizeof *tmp);
+		(*argc)++;
+		char **tmp = realloc(*arguments, *argc * sizeof *tmp);
 		if (tmp == NULL)
 		{
 			return MEMORY_ERROR;
 		}
 		
 		*arguments = tmp;
-		(*arguments)[argc] = NULL;
+		(*arguments)[*argc - 1] = NULL;
 	}
 
 	return SUCCESS;
@@ -195,7 +220,7 @@ char **split(char *s, char delim, size_t *number)
 	return ret_val;
 }
 
-status_code execute(char **arguments, int background)
+status_code execute(char **arguments, unsigned short background)
 {
 	pid_t pid = fork();
 	if (pid < 0)
@@ -219,9 +244,72 @@ status_code execute(char **arguments, int background)
 	return SUCCESS;
 }
 
-void add_to_history(command_t *history, uintmax_t *num_commands, char **arguments)
+void add_to_history(history_t *history, char **arguments, size_t argc, unsigned short background)
 {
-	return;
+	size_t index = history->num_commands % HISTORY_LENGTH;
+	if (history->num_commands >= HISTORY_LENGTH)
+	{
+		clear_history_entry(history, index);
+	}
+	history->num_commands++;
+
+	history->commands[index].number = history->num_commands;
+
+	char **new_array = malloc(argc * sizeof *new_array);
+	size_t i;
+	for (i = 0; i < argc - 1; i++)
+	{
+		new_array[i] = strdup(arguments[i]);
+	}
+	new_array[i] = NULL;
+
+	history->commands[index].arguments = new_array;
+	history->commands[index].background = background;
+	history->commands[index].argc = argc;
+}
+
+void clear_history_entry(history_t *history, size_t index)
+{
+	size_t i;
+	for (i = 0; history->commands[index].arguments[i]; i++)
+	{
+		free(history->commands[index].arguments[i]);
+	}
+	free(history->commands[index].arguments);
+}
+
+void clear_history(history_t *history)
+{
+	size_t min = MIN(history->num_commands, HISTORY_LENGTH);
+	size_t i;
+	for (i = 0; i < min; i++)
+	{
+		clear_history_entry(history, i);
+	}
+}
+
+void print_history(history_t *history)
+{
+	size_t num_to_do = history->num_commands < HISTORY_LENGTH ? history->num_commands : HISTORY_LENGTH;
+	ssize_t start_index = history->num_commands % HISTORY_LENGTH;
+	size_t i;
+	for (i = 1; i <= num_to_do; i++)
+	{
+		ssize_t current_index = (start_index - (ssize_t) i) % HISTORY_LENGTH;
+		current_index += current_index < 0 ? HISTORY_LENGTH : 0;
+		fprintf(stdout, "%zu", history->commands[current_index].number);
+		size_t j;
+		for (j = 0; history->commands[current_index].arguments[j]; j++)
+		{
+			fprintf(stdout, " %s", history->commands[current_index].arguments[j]);
+		}
+
+		if (history->commands[current_index].background)
+		{
+			fprintf(stdout, " &");
+		}
+		fprintf(stdout, "\n");
+	}		
 }
 
 
