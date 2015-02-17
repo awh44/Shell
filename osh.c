@@ -1,21 +1,22 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "vector_t.h"
-#include "string_t.h"
+#define SUCCESS      0
+#define READ_ERROR   1
+#define LINE_EMPTY   2
+#define MEMORY_ERROR 4
+#define FORK_ERROR   8
+#define EXEC_ERROR   16
 
-#define SUCCESS    0
-#define READ_ERROR 1
-#define LINE_EMPTY 2
-#define MEMO_ERROR 4
-#define FORK_ERROR 8
-#define EXEC_ERROR 16
+typedef int status_code;
 
-int parse_line(char *line, size_t chars_read, char ***arguments, size_t *argc, int *background);
+void read_evaluate_print(FILE *stream);
+status_code parse_line(char *line, size_t chars_read, char ***arguments, int *background);
 void trim(char *line, size_t length);
 char **split(char *s, char delim, size_t *number);
-void free_char_array(char **arr, size_t number);
-void handle_error(int error_code);
+status_code execute(char **arguments, int background); 
+void handle_error(status_code error_code);
 
 int main(int argc, char *argv[])
 {
@@ -36,21 +37,20 @@ int main(int argc, char *argv[])
 		else if (strcmp(line, "exit\n") != 0)
 		{
 			char **arguments = NULL;
-			size_t argc = 0;
 			int background;
-			int error = parse_line(line, chars_read, &arguments, &argc, &background);
+			status_code error = parse_line(line, chars_read, &arguments, &background);
 			if (error != SUCCESS)
 			{
 				handle_error(error);
 			}
 			else
 			{
-				error = execute(arguments, argc, background);
+				error = execute(arguments, background);
 				if (error == EXEC_ERROR)
 				{
 					//child process could not execute execvp, so free its memory and exit
 					handle_error(error);
-					free_char_array(arguments, argc);
+					free(arguments);
 					free(line);
 					exit(1);
 				}
@@ -60,7 +60,9 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			free_char_array(arguments, argc);
+			//arguments must either be NULL or must not have been freed by one of the subsequently
+			//called functions, so safe to just free it here.
+			free(arguments);
 		}
 		else
 		{
@@ -72,9 +74,9 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-int parse_line(char *line, size_t chars_read, char*** arguments, size_t *argc, int *background)
+status_code parse_line(char *line, size_t chars_read, char*** arguments, int *background)
 {
-	//handle case of "empty line"
+	//handle case of empty line
 	if (chars_read <= 1)
 	{
 		return LINE_EMPTY;
@@ -88,31 +90,31 @@ int parse_line(char *line, size_t chars_read, char*** arguments, size_t *argc, i
 	trim(line, chars_read);
 
 	//split the line into the arguments array
-	*arguments = split(line, ' ', argc);
+	size_t argc;
+	*arguments = split(line, ' ', &argc);
 	if (*arguments == NULL)
 	{
-		return MEMO_ERROR;
+		return MEMORY_ERROR;
 	}
 	
 	//determine if the process should be run in the background
 	*background = 0;
-	if (strcmp((*arguments)[*argc - 1], "&") == 0)
+	if (strcmp((*arguments)[argc - 1], "&") == 0)
 	{
 		*background = 1;
-		(*argc)--;
-		free((*arguments)[*argc]);
-		(*arguments)[*argc] = NULL;
+		argc--;
+		(*arguments)[argc] = NULL;
 	}
 	else
 	{
-		char **tmp = realloc(*arguments, (*argc + 1) * sizeof *tmp);
+		char **tmp = realloc(*arguments, (argc + 1) * sizeof *tmp);
 		if (tmp == NULL)
 		{
-			return MEMO_ERROR;
+			return MEMORY_ERROR;
 		}
 		
 		*arguments = tmp;
-		(*arguments)[*argc] = NULL;
+		(*arguments)[argc] = NULL;
 	}
 
 	return SUCCESS;
@@ -150,49 +152,31 @@ char **split(char *s, char delim, size_t *number)
     size_t i;
     for (i = 0; s[i]; i++)
     {
-        if (s[i] == delim)
+        if (s[i] == delim || s[i + 1] == '\0')
         {
             (*number)++;
 			char **tmp = realloc(ret_val, *number * sizeof *ret_val);
 			if (tmp == NULL)
 			{
-				free_char_array(ret_val, *number - 1);
+				free(ret_val);
 				return NULL;
 			}
 
 			ret_val = tmp;
-            s[i] = '\0';
-            ret_val[*number - 1] = strdup(start_pos);
+            if (s[i] == delim)
+			{
+				s[i] = '\0';
+			}
+            ret_val[*number - 1] = start_pos;
 
-            s[i] = delim;
             start_pos = s + i + 1;
         }
     }
-
-    (*number)++;
-	char **tmp = realloc(ret_val, *number * sizeof *ret_val);
-	if (tmp == NULL)
-	{
-		free_char_array(ret_val, *number - 1);
-		return NULL;
-	}
-	ret_val = tmp;
-    ret_val[*number - 1] = strndup(start_pos, s + i - start_pos);
-
-    return ret_val;
+    
+	return ret_val;
 }
 
-void free_char_array(char **arr, size_t number)
-{
-	size_t i;
-	for (i = 0; i < number; i++)
-	{
-		free(arr[i]);
-	}
-	free(arr);
-}
-
-int execute(char **arguments, size_t argc, int background)
+status_code execute(char **arguments, int background)
 {
 	pid_t pid = fork();
 	if (pid < 0)
@@ -217,27 +201,26 @@ int execute(char **arguments, size_t argc, int background)
 }
 
 
-void handle_error(int error_code)
+void handle_error(status_code error_code)
 {
-	fprintf(stderr, "Error: ");
 	switch (error_code)
 	{
 		case READ_ERROR:
-			fprintf(stderr, "Could not read.");
+			fprintf(stderr, "\nError: Could not read.");
 			break;
 		case LINE_EMPTY:
 			break;
-		case MEMO_ERROR:
-			fprintf(stderr, "Could not allocate memory.");
+		case MEMORY_ERROR:
+			fprintf(stderr, "Error: Could not allocate memory.");
 			break;
 		case FORK_ERROR:
-			fprintf(stderr, "Could not fork.");
+			fprintf(stderr, "Error: Could not fork.");
 			break;
 		case EXEC_ERROR:
-			fprintf(stderr, "Could not execute the program.");
+			fprintf(stderr, "Error: Could not execute the program.");
 			break;
 		default:
-			fprintf(stderr, "Unknown error.");
+			fprintf(stderr, "Error: Unknown error.");
 	}
 	fprintf(stderr, "\n");
 }
