@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #define SUCCESS      0
 #define READ_ERROR   1
@@ -9,13 +10,21 @@
 #define FORK_ERROR   8
 #define EXEC_ERROR   16
 
-typedef int status_code;
+#define HISTORY_LENGTH 10
 
-void read_evaluate_print(FILE *stream);
+typedef int status_code;
+typedef struct
+{
+	uintmax_t number;
+	char **arguments;
+} command_t;
+
+unsigned short eval_print(char *line, size_t size, command_t *history, uintmax_t *num_commands);
 status_code parse_line(char *line, size_t chars_read, char ***arguments, int *background);
 void trim(char *line, size_t length);
 char **split(char *s, char delim, size_t *number);
-status_code execute(char **arguments, int background); 
+status_code execute(char **arguments, int background);
+void add_to_history(command_t *history, uintmax_t *num_commands, char **arguments);
 void handle_error(status_code error_code);
 
 int main(int argc, char *argv[])
@@ -23,55 +32,65 @@ int main(int argc, char *argv[])
 	int cont = 1;
 	char *line = NULL;
 	size_t size;
+	uintmax_t num_commands;
+	command_t history[HISTORY_LENGTH] = {0};
 
 	while (cont)
 	{
 		fprintf(stdout, "osh> ");
 		fflush(stdout);
-
 		ssize_t chars_read = getline(&line, &size, stdin);
 		if (chars_read < 0)
 		{
 			handle_error(READ_ERROR);
 		}
-		else if (strcmp(line, "exit\n") != 0)
-		{
-			char **arguments = NULL;
-			int background;
-			status_code error = parse_line(line, chars_read, &arguments, &background);
-			if (error != SUCCESS)
-			{
-				handle_error(error);
-			}
-			else
-			{
-				error = execute(arguments, background);
-				if (error == EXEC_ERROR)
-				{
-					//child process could not execute execvp, so free its memory and exit
-					handle_error(error);
-					free(arguments);
-					free(line);
-					exit(1);
-				}
-				else if (error != SUCCESS)
-				{
-					handle_error(error);
-				}
-			}
-
-			//arguments must either be NULL or must not have been freed by one of the subsequently
-			//called functions, so safe to just free it here.
-			free(arguments);
-		}
 		else
 		{
-			cont = 0;
+			cont = eval_print(line, chars_read, history, &num_commands);
 		}
 	}
 
 	free(line);
 	return 0;
+}
+
+unsigned short eval_print(char *line, size_t chars_read, command_t *history, uintmax_t *num_commands)
+{
+	if (strcmp(line, "exit\n") == 0)
+	{
+		return 0;
+	}
+
+	char **arguments = NULL;
+	int background;
+	status_code error = parse_line(line, chars_read, &arguments, &background);
+	if (error != SUCCESS)
+	{
+		handle_error(error);
+		return 1;
+	}
+
+	error = execute(arguments, background);
+	if (error == EXEC_ERROR)
+	{
+		//child process could not execute execvp, so free its memory and exit
+		handle_error(error);
+		free(arguments);
+		free(line);
+		exit(1);
+	}
+	else if (error != SUCCESS)
+	{
+		handle_error(error);
+	}
+
+	(*num_commands)++;
+	add_to_history(history, num_commands, arguments);
+
+	//arguments must either be NULL or must not have been freed by one of the subsequently
+	//called functions, so safe to just free it here.	
+	free(arguments);
+	return 1;
 }
 
 status_code parse_line(char *line, size_t chars_read, char*** arguments, int *background)
@@ -198,6 +217,11 @@ status_code execute(char **arguments, int background)
 	}
 
 	return SUCCESS;
+}
+
+void add_to_history(command_t *history, uintmax_t *num_commands, char **arguments)
+{
+	return;
 }
 
 
