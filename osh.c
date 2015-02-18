@@ -3,16 +3,20 @@
 #include <string.h>
 #include <stdint.h>
 
-#define SUCCESS         0
-#define READ_ERROR      1
-#define LINE_EMPTY      2
-#define MEMORY_ERROR    4
-#define FORK_ERROR      8
-#define EXEC_ERROR     16
-#define NO_COMMANDS    32
-#define NO_EXIST_ERROR 64 
+#define SUCCESS          0
+#define READ_ERROR       1
+#define LINE_EMPTY       2
+#define MEMORY_ERROR     4
+#define FORK_ERROR       8
+#define EXEC_ERROR      16
+#define NO_COMMANDS     32
+#define NO_EXIST_ERROR  64
+#define NUMBER_ERROR   128
 
 #define HISTORY_LENGTH 10
+
+#define ASCII_0 48
+#define ASCII_9 57
 
 #define MIN(a, b) (a) < (b) ? (a) : (b)
 
@@ -43,6 +47,7 @@ void clear_history_entry(history_t *history, size_t index);
 void clear_history(history_t *history);
 void print_history(history_t *history);
 void handle_error(status_code error_code);
+status_code convert(char *s, size_t *value);
 
 int main(int argc, char *argv[])
 {
@@ -241,7 +246,21 @@ status_code execute_builtin(history_t *history, command_t *command, unsigned sho
 		}
 		else
 		{
-			return NO_EXIST_ERROR;
+			size_t number;
+			status_code error = convert(command->arguments[0] + 1, &number);
+			if (error != SUCCESS)
+			{
+				return error;
+			}
+		
+			ssize_t min_number = (ssize_t) history->num_commands - HISTORY_LENGTH + 1;
+			if ((number > history->num_commands) || (ssize_t) number < min_number || number == 0)
+			{
+				return NO_EXIST_ERROR;
+			}
+
+			size_t index = (number - 1) & HISTORY_LENGTH;
+			return execute(history, &history->commands[index]);
 		}
 	}
 
@@ -361,8 +380,35 @@ void handle_error(status_code error_code)
 		case EXEC_ERROR:
 			fprintf(stderr, "Error: Could not execute the program.");
 			break;
+		case NO_COMMANDS:
+			fprintf(stderr, "Error: No commands in history.");
+			break;
+		case NO_EXIST_ERROR:
+			fprintf(stderr, "Error: That command does not exist in the history.");
+			break;
+		case NUMBER_ERROR:
+			fprintf(stderr, "Error: Number formatted incorrectly.");
+			break;
 		default:
 			fprintf(stderr, "Error: Unknown error.");
 	}
 	fprintf(stderr, "\n");
+}
+
+status_code convert(char *s, size_t *value)
+{
+	*value = 0;
+	size_t length = strlen(s);
+	size_t power10;
+	size_t i;
+	for (i = length - 1, power10 = 1; i < SIZE_MAX; i--, power10 *= 10)
+	{
+		if (s[i] < ASCII_0 || s[i] > ASCII_9)
+		{
+			return NUMBER_ERROR;
+		}
+		*value += (s[i] - ASCII_0) * power10;
+	}
+
+	return SUCCESS;
 }
