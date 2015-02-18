@@ -46,6 +46,7 @@ void add_to_history(history_t *history, command_t *command);
 void clear_history_entry(history_t *history, size_t index);
 void clear_history(history_t *history);
 void print_history(history_t *history);
+void print_command(command_t *command);
 void handle_error(status_code error_code);
 status_code convert(char *s, size_t *value);
 
@@ -236,8 +237,9 @@ status_code execute_builtin(history_t *history, command_t *command, unsigned sho
 		{
 			if (history->num_commands >= 1)
 			{
-				command_t old_command = history->commands[(history->num_commands - 1) % HISTORY_LENGTH];
-				return execute(history, &old_command);
+				command_t *old_command = &history->commands[(history->num_commands - 1) % HISTORY_LENGTH];
+				print_command(old_command);
+				return execute(history, old_command);
 			}
 			else
 			{
@@ -260,7 +262,9 @@ status_code execute_builtin(history_t *history, command_t *command, unsigned sho
 			}
 
 			size_t index = (number - 1) & HISTORY_LENGTH;
-			return execute(history, &history->commands[index]);
+			command_t *old_command = &history->commands[index];
+			print_command(old_command);
+			return execute(history, old_command);
 		}
 	}
 
@@ -346,19 +350,25 @@ void print_history(history_t *history)
 	{
 		ssize_t current_index = (start_index - (ssize_t) i) % HISTORY_LENGTH;
 		current_index += current_index < 0 ? HISTORY_LENGTH : 0;
-		fprintf(stdout, "%zu", history->commands[current_index].number);
-		size_t j;
-		for (j = 0; history->commands[current_index].arguments[j]; j++)
-		{
-			fprintf(stdout, " %s", history->commands[current_index].arguments[j]);
-		}
-
-		if (history->commands[current_index].background)
-		{
-			fprintf(stdout, " &");
-		}
-		fprintf(stdout, "\n");
+		print_command(&history->commands[current_index]);
 	}		
+}
+
+void print_command(command_t *command)
+{
+	fprintf(stdout, "%zu", command->number);
+	size_t j;
+	for (j = 0; command->arguments[j]; j++)
+	{
+		fprintf(stdout, " %s", command->arguments[j]);
+	}
+
+	if (command->background)
+	{
+		fprintf(stdout, " &");
+	}
+
+	fprintf(stdout, "\n");
 }
 
 
