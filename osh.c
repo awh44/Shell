@@ -20,7 +20,7 @@
 
 #define MIN(a, b) (a) < (b) ? (a) : (b)
 
-typedef int status_code;
+typedef int status_t;
 
 typedef struct
 {
@@ -37,18 +37,18 @@ typedef struct
 } history_t;
 
 unsigned short eval_print(char *line, size_t size, history_t *history);
-status_code parse_line(char *line, size_t chars_read, command_t *command);
+status_t parse_line(char *line, size_t chars_read, command_t *command);
 void trim(char *line, size_t length);
 char **split(char *s, char delim, size_t *number);
-status_code execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin);
-status_code execute(history_t *history, command_t *command);
+status_t execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin);
+status_t execute(history_t *history, command_t *command);
 void add_to_history(history_t *history, command_t *command);
 void clear_history_entry(history_t *history, size_t index);
 void clear_history(history_t *history);
 void print_history(history_t *history);
 void print_command(command_t *command);
-void handle_error(status_code error_code);
-status_code convert(char *s, size_t *value);
+void handle_error(status_t error_code);
+status_t convert(char *s, size_t *value);
 
 int main(int argc, char *argv[])
 {
@@ -85,7 +85,7 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 	} 
 
 	command_t command = {0};
-	status_code error = parse_line(line, chars_read, &command);
+	status_t error = parse_line(line, chars_read, &command);
 	if (error != SUCCESS)
 	{
 		handle_error(error);
@@ -120,7 +120,7 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 	return 1;
 }
 
-status_code parse_line(char *line, size_t chars_read, command_t *command)
+status_t parse_line(char *line, size_t chars_read, command_t *command)
 {
 	//handle case of empty line
 	if (chars_read <= 1)
@@ -221,7 +221,7 @@ char **split(char *s, char delim, size_t *number)
 	return ret_val;
 }
 
-status_code execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin)
+status_t execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin)
 {
 	if (strcmp(command->arguments[0], "history") == 0)
 	{
@@ -249,7 +249,7 @@ status_code execute_builtin(history_t *history, command_t *command, unsigned sho
 		else
 		{
 			size_t number;
-			status_code error = convert(command->arguments[0] + 1, &number);
+			status_t error = convert(command->arguments[0] + 1, &number);
 			if (error != SUCCESS)
 			{
 				return error;
@@ -262,6 +262,7 @@ status_code execute_builtin(history_t *history, command_t *command, unsigned sho
 			}
 
 			size_t index = (number - 1) & HISTORY_LENGTH;
+			printf("number = %zu, index = %zu\n", number, index);
 			command_t *old_command = &history->commands[index];
 			print_command(old_command);
 			return execute(history, old_command);
@@ -272,7 +273,7 @@ status_code execute_builtin(history_t *history, command_t *command, unsigned sho
 	return SUCCESS;
 }
 
-status_code execute(history_t *history, command_t *command)
+status_t execute(history_t *history, command_t *command)
 {
 	add_to_history(history, command);
 	pid_t pid = fork();
@@ -372,7 +373,7 @@ void print_command(command_t *command)
 }
 
 
-void handle_error(status_code error_code)
+void handle_error(status_t error_code)
 {
 	switch (error_code)
 	{
@@ -405,7 +406,7 @@ void handle_error(status_code error_code)
 	fprintf(stderr, "\n");
 }
 
-status_code convert(char *s, size_t *value)
+status_t convert(char *s, size_t *value)
 {
 	*value = 0;
 	size_t length = strlen(s);
