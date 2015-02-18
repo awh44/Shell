@@ -3,18 +3,21 @@
 #include <string.h>
 #include <stdint.h>
 
-#define SUCCESS      0
-#define READ_ERROR   1
-#define LINE_EMPTY   2
-#define MEMORY_ERROR 4
-#define FORK_ERROR   8
-#define EXEC_ERROR   16
+#define SUCCESS         0
+#define READ_ERROR      1
+#define LINE_EMPTY      2
+#define MEMORY_ERROR    4
+#define FORK_ERROR      8
+#define EXEC_ERROR     16
+#define NO_COMMANDS    32
+#define NO_EXIST_ERROR 64 
 
 #define HISTORY_LENGTH 10
 
 #define MIN(a, b) (a) < (b) ? (a) : (b)
 
 typedef int status_code;
+
 typedef struct
 {
 	size_t number;
@@ -30,11 +33,12 @@ typedef struct
 } history_t;
 
 unsigned short eval_print(char *line, size_t size, history_t *history);
-status_code parse_line(char *line, size_t chars_read, char ***arguments, size_t *argc, unsigned short *background);
+status_code parse_line(char *line, size_t chars_read, command_t *command);
 void trim(char *line, size_t length);
 char **split(char *s, char delim, size_t *number);
-status_code execute(char **arguments, unsigned short background);
-void add_to_history(history_t *history, char **arguments, size_t argc, unsigned short background);
+status_code execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin);
+status_code execute(history_t *history, command_t *command);
+void add_to_history(history_t *history, command_t *command);
 void clear_history_entry(history_t *history, size_t index);
 void clear_history(history_t *history);
 void print_history(history_t *history);
@@ -72,36 +76,28 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 	if (strcmp(line, "exit\n") == 0)
 	{
 		return 0;
-	}
-	else if (strcmp(line, "history\n") == 0)
-	{
-		print_history(history);
-		return 1;
-	}
-	else if (strcmp(line, "!!\n") == 0 && history->num_commands > 0)
-	{
-		command_t command = history->commands[(history->num_commands - 1) % HISTORY_LENGTH];
-		execute(command.arguments, command.background);
-		add_to_history(history, command.arguments, command.argc, command.background);
-		return 1;
-	}
+	} 
 
-	char **arguments = NULL;
-	size_t argc = 0;
-	unsigned short background;
-	status_code error = parse_line(line, chars_read, &arguments, &argc, &background);
+	command_t command = {0};
+	status_code error = parse_line(line, chars_read, &command);
 	if (error != SUCCESS)
 	{
 		handle_error(error);
 		return 1;
 	}
 
-	error = execute(arguments, background);
+	unsigned short is_builtin;
+	error = execute_builtin(history, &command, &is_builtin);
+	if (!is_builtin)
+	{
+		error = execute(history, &command);
+	}
+
 	if (error == EXEC_ERROR)
 	{
 		//child process could not execute execvp, so free its memory and exit
 		handle_error(error);
-		free(arguments);
+		free(command.arguments);
 		free(line);
 		clear_history(history);
 		exit(1);
@@ -111,15 +107,14 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 		handle_error(error);
 	}
 
-	add_to_history(history, arguments, argc, background);
 
 	//arguments must either be NULL or must not have been freed by one of the subsequently
 	//called functions, so safe to just free it here.	
-	free(arguments);
+	free(command.arguments);
 	return 1;
 }
 
-status_code parse_line(char *line, size_t chars_read, char*** arguments, size_t *argc, unsigned short *background)
+status_code parse_line(char *line, size_t chars_read, command_t *command)
 {
 	//handle case of empty line
 	if (chars_read <= 1)
@@ -135,30 +130,30 @@ status_code parse_line(char *line, size_t chars_read, char*** arguments, size_t 
 	trim(line, chars_read);
 
 	//split the line into the arguments array
-	*arguments = split(line, ' ', argc);
-	if (*arguments == NULL)
+	command->arguments = split(line, ' ', &command->argc);
+	if (command->arguments == NULL)
 	{
 		return MEMORY_ERROR;
 	}
 	
 	//determine if the process should be run in the background
-	*background = 0;
-	if (strcmp((*arguments)[*argc - 1], "&") == 0)
+	command->background = 0;
+	if (strcmp(command->arguments[command->argc - 1], "&") == 0)
 	{
-		*background = 1;
-		(*arguments)[*argc - 1] = NULL;
+		command->background = 1;
+		(command->arguments)[command->argc - 1] = NULL;
 	}
 	else
 	{
-		(*argc)++;
-		char **tmp = realloc(*arguments, *argc * sizeof *tmp);
+		command->argc++;
+		char **tmp = realloc(command->arguments, command->argc * sizeof *tmp);
 		if (tmp == NULL)
 		{
 			return MEMORY_ERROR;
 		}
 		
-		*arguments = tmp;
-		(*arguments)[*argc - 1] = NULL;
+		command->arguments = tmp;
+		command->arguments[command->argc - 1] = NULL;
 	}
 
 	return SUCCESS;
@@ -220,8 +215,43 @@ char **split(char *s, char delim, size_t *number)
 	return ret_val;
 }
 
-status_code execute(char **arguments, unsigned short background)
+status_code execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin)
 {
+	if (strcmp(command->arguments[0], "history") == 0)
+	{
+		print_history(history);
+		*is_builtin = 1;
+		return SUCCESS;
+	}
+
+	if (command->arguments[0][0] == '!')
+	{
+		*is_builtin = 1;
+		if (command->arguments[0][1] == '!')
+		{
+			if (history->num_commands >= 1)
+			{
+				command_t old_command = history->commands[(history->num_commands - 1) % HISTORY_LENGTH];
+				return execute(history, &old_command);
+			}
+			else
+			{
+				return NO_COMMANDS;
+			}
+		}
+		else
+		{
+			return NO_EXIST_ERROR;
+		}
+	}
+
+	*is_builtin = 0;
+	return SUCCESS;
+}
+
+status_code execute(history_t *history, command_t *command)
+{
+	add_to_history(history, command);
 	pid_t pid = fork();
 	if (pid < 0)
 	{
@@ -230,12 +260,12 @@ status_code execute(char **arguments, unsigned short background)
 	else if (pid == 0)
 	{
 		//have child execute the desired program
-		if (execvp(arguments[0], arguments) < 0)
+		if (execvp(command->arguments[0], command->arguments) < 0)
 		{
 			return EXEC_ERROR;
 		}
 	}
-	else if (!background)
+	else if (!command->background)
 	{
 		int status;
 		waitpid(pid, &status, NULL);
@@ -244,7 +274,7 @@ status_code execute(char **arguments, unsigned short background)
 	return SUCCESS;
 }
 
-void add_to_history(history_t *history, char **arguments, size_t argc, unsigned short background)
+void add_to_history(history_t *history, command_t *command)
 {
 	size_t index = history->num_commands % HISTORY_LENGTH;
 	if (history->num_commands >= HISTORY_LENGTH)
@@ -255,17 +285,17 @@ void add_to_history(history_t *history, char **arguments, size_t argc, unsigned 
 
 	history->commands[index].number = history->num_commands;
 
-	char **new_array = malloc(argc * sizeof *new_array);
+	char **new_array = malloc(command->argc * sizeof *new_array);
 	size_t i;
-	for (i = 0; i < argc - 1; i++)
+	for (i = 0; i < command->argc - 1; i++)
 	{
-		new_array[i] = strdup(arguments[i]);
+		new_array[i] = strdup(command->arguments[i]);
 	}
 	new_array[i] = NULL;
 
 	history->commands[index].arguments = new_array;
-	history->commands[index].background = background;
-	history->commands[index].argc = argc;
+	history->commands[index].background = command->background;
+	history->commands[index].argc = command->argc;
 }
 
 void clear_history_entry(history_t *history, size_t index)
