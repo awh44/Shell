@@ -34,6 +34,7 @@ typedef struct
 {
 	command_t commands[HISTORY_LENGTH];
 	size_t num_commands;
+	size_t length;
 } history_t;
 
 unsigned short eval_print(char *line, size_t size, history_t *history);
@@ -43,7 +44,7 @@ char **split(char *s, char delim, size_t *number);
 status_t execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin);
 status_t execute(history_t *history, command_t *command);
 void add_to_history(history_t *history, command_t *command);
-void clear_history_entry(history_t *history, size_t index);
+void free_command(command_t *command);
 void clear_history(history_t *history);
 void print_history(history_t *history);
 void print_command(command_t *command);
@@ -56,6 +57,7 @@ int main(int argc, char *argv[])
 	char *line = NULL;
 	size_t size;
 	history_t history = {0};
+	history.length = HISTORY_LENGTH;
 
 	while (cont)
 	{
@@ -237,7 +239,7 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 		{
 			if (history->num_commands >= 1)
 			{
-				command_t *old_command = &history->commands[(history->num_commands - 1) % HISTORY_LENGTH];
+				command_t *old_command = &history->commands[(history->num_commands - 1) % history->length];
 				print_command(old_command);
 				return execute(history, old_command);
 			}
@@ -255,13 +257,13 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 				return error;
 			}
 		
-			ssize_t min_number = (ssize_t) history->num_commands - HISTORY_LENGTH + 1;
+			ssize_t min_number = (ssize_t) history->num_commands - (ssize_t) history->length + 1;
 			if ((number > history->num_commands) || (ssize_t) number < min_number || number == 0)
 			{
 				return NO_EXIST_ERROR;
 			}
 
-			size_t index = (number - 1) & HISTORY_LENGTH;
+			size_t index = (number - 1) % history->length;
 			printf("number = %zu, index = %zu\n", number, index);
 			command_t *old_command = &history->commands[index];
 			print_command(old_command);
@@ -275,13 +277,14 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 
 status_t execute(history_t *history, command_t *command)
 {
-	add_to_history(history, command);
 	pid_t pid = fork();
 	if (pid < 0)
 	{
+		add_to_history(history, command);
 		return FORK_ERROR;
 	}
-	else if (pid == 0)
+	
+	if (pid == 0)
 	{
 		//have child execute the desired program
 		if (execvp(command->arguments[0], command->arguments) < 0)
@@ -289,7 +292,12 @@ status_t execute(history_t *history, command_t *command)
 			return EXEC_ERROR;
 		}
 	}
-	else if (!command->background)
+	
+	//parent case - child process will either be replaced or will return (in the case of an error),
+	//so will never reach here
+	add_to_history(history, command);
+	//if it's now a background command, then don't wait for it
+	if (!command->background)
 	{
 		int status;
 		waitpid(pid, &status, NULL);
@@ -300,12 +308,11 @@ status_t execute(history_t *history, command_t *command)
 
 void add_to_history(history_t *history, command_t *command)
 {
-	size_t index = history->num_commands % HISTORY_LENGTH;
-	if (history->num_commands >= HISTORY_LENGTH)
-	{
-		clear_history_entry(history, index);
-	}
+	size_t index = history->num_commands % history->length;
 	history->num_commands++;
+
+	//save the old command's values, in case it needs to be freed later
+	command_t old_command = history->commands[index];
 
 	history->commands[index].number = history->num_commands;
 
@@ -320,37 +327,42 @@ void add_to_history(history_t *history, command_t *command)
 	history->commands[index].arguments = new_array;
 	history->commands[index].background = command->background;
 	history->commands[index].argc = command->argc;
+
+	if (history->num_commands > history->length)
+	{
+		free_command(&old_command);
+	}
 }
 
-void clear_history_entry(history_t *history, size_t index)
+void free_command(command_t *command)
 {
 	size_t i;
-	for (i = 0; history->commands[index].arguments[i]; i++)
+	for (i = 0; command->arguments[i]; i++)
 	{
-		free(history->commands[index].arguments[i]);
+		free(command->arguments[i]);
 	}
-	free(history->commands[index].arguments);
+	free(command->arguments);
 }
 
 void clear_history(history_t *history)
 {
-	size_t min = MIN(history->num_commands, HISTORY_LENGTH);
+	size_t min = MIN(history->num_commands, history->length);
 	size_t i;
 	for (i = 0; i < min; i++)
 	{
-		clear_history_entry(history, i);
+		free_command(&history->commands[i]);
 	}
 }
 
 void print_history(history_t *history)
 {
-	size_t num_to_do = history->num_commands < HISTORY_LENGTH ? history->num_commands : HISTORY_LENGTH;
-	ssize_t start_index = history->num_commands % HISTORY_LENGTH;
+	size_t num_to_do = MIN(history->num_commands, history->length);
+	ssize_t start_index = history->num_commands % history->length;
 	size_t i;
 	for (i = 1; i <= num_to_do; i++)
 	{
-		ssize_t current_index = (start_index - (ssize_t) i) % HISTORY_LENGTH;
-		current_index += current_index < 0 ? HISTORY_LENGTH : 0;
+		ssize_t current_index = (start_index - (ssize_t) i) % (ssize_t) history->length;
+		current_index += current_index < 0 ? history->length : 0;
 		print_command(&history->commands[current_index]);
 	}		
 }
