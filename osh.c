@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,13 +6,15 @@
 
 #define SUCCESS          0
 #define READ_ERROR       1
-#define LINE_EMPTY       2
+#define LINE_EMPTY       3
 #define MEMORY_ERROR     4
-#define FORK_ERROR       8
-#define EXEC_ERROR      16
-#define NO_COMMANDS     32
-#define NO_EXIST_ERROR  64
-#define NUMBER_ERROR   128
+#define FORK_ERROR       5
+#define EXEC_ERROR       6
+#define NO_COMMANDS      7
+#define NO_EXIST_ERROR   8
+#define NUMBER_ERROR     9
+#define NO_DIRECTORY    10
+#define CD_ERROR        11
 
 #define HISTORY_LENGTH 10
 
@@ -48,7 +51,7 @@ void free_command(command_t *command);
 void clear_history(history_t *history);
 void print_history(history_t *history);
 void print_command(command_t *command);
-void handle_error(status_t error_code);
+void error_message(status_t error_code);
 status_t convert(char *s, size_t *value);
 
 int main(int argc, char *argv[])
@@ -66,7 +69,7 @@ int main(int argc, char *argv[])
 		ssize_t chars_read = getline(&line, &size, stdin);
 		if (chars_read < 0)
 		{
-			handle_error(READ_ERROR);
+			error_message(READ_ERROR);
 		}
 		else
 		{
@@ -90,7 +93,7 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 	status_t error = parse_line(line, chars_read, &command);
 	if (error != SUCCESS)
 	{
-		handle_error(error);
+		error_message(error);
 		return 1;
 	}
 
@@ -104,7 +107,7 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 	if (error == EXEC_ERROR)
 	{
 		//child process could not execute execvp, so free its memory and exit
-		handle_error(error);
+		error_message(error);
 		free(command.arguments);
 		free(line);
 		clear_history(history);
@@ -112,7 +115,7 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 	}
 	else if (error != SUCCESS)
 	{
-		handle_error(error);
+		error_message(error);
 	}
 
 
@@ -271,6 +274,23 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 		}
 	}
 
+	if (strcmp(command->arguments[0], "cd") == 0)
+	{
+		*is_builtin = 1;
+		//one for "cd", one for the directory, one for the NULL pointer
+		if (command->argc < 3)
+		{
+			return NO_DIRECTORY;
+		}
+
+		if (chdir(command->arguments[1]) < 0)
+		{
+			return CD_ERROR;
+		}
+
+		return SUCCESS;
+	}
+
 	*is_builtin = 0;
 	return SUCCESS;
 }
@@ -385,7 +405,7 @@ void print_command(command_t *command)
 }
 
 
-void handle_error(status_t error_code)
+void error_message(status_t error_code)
 {
 	switch (error_code)
 	{
@@ -411,6 +431,12 @@ void handle_error(status_t error_code)
 			break;
 		case NUMBER_ERROR:
 			fprintf(stderr, "Error: Number formatted incorrectly.");
+			break;
+		case NO_DIRECTORY:
+			fprintf(stderr, "Error: No directory included.");
+			break;
+		case CD_ERROR:
+			fprintf(stderr, "Error: Could not change to that directory.");
 			break;
 		default:
 			fprintf(stderr, "Error: Unknown error.");
