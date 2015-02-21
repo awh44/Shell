@@ -1,8 +1,9 @@
-#include <unistd.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define SUCCESS          0
 #define READ_ERROR       1
@@ -320,7 +321,7 @@ status_t execute(history_t *history, command_t *command)
 	if (!command->background)
 	{
 		int status;
-		waitpid(pid, &status, NULL);
+		waitpid(pid, &status, 0);
 	}
 
 	return SUCCESS;
