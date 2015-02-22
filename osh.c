@@ -14,8 +14,10 @@
 #define NO_COMMANDS      7
 #define NO_EXIST_ERROR   8
 #define NUMBER_ERROR     9
-#define ARGS_ERROR    10
+#define ARGS_ERROR      10
 #define CD_ERROR        11
+#define EXISTS_ERROR    12
+#define FORMAT_ERROR    13
 
 #define HISTORY_LENGTH 10
 #define ALIAS_BUCKETS  128
@@ -42,15 +44,16 @@ typedef struct
 	size_t length;
 } history_t;
 
-typedef struct
+typedef struct alias_t
 {
 	char *alias;
 	command_t *command;
+	struct alias_t *next;
 } alias_t;
 
 typedef struct
 {
-	alias_t aliases[ALIAS_BUCKETS];
+	alias_t *alias_entries[ALIAS_BUCKETS];
 	size_t buckets;
 } alias_table_t;
 
@@ -83,14 +86,19 @@ void print_command(command_t *command);
 void free_command(command_t *command);
 //-----------------
 
-//HISTORY and COMMAND FUNCTIONS
+//HISTORY FUNCTIONS
 void add_to_history(history_t *history, command_t *command);
 void clear_history(history_t *history);
 void print_history(history_t *history);
 //-----------------------------
 
 //ALIAS FUNCTIONS
-status_t add_alias(alias_table_t *table, char *name, char *command);
+status_t add_alias(alias_table_t *table, char *name, char *command, unsigned short overwrite);
+void print_aliases(alias_table_t *table);
+alias_t *find_alias(alias_table_t *table, char *alias);
+void remove_alias(alias_table_t *table, char *entry);
+void clear_aliases(alias_table_t *table);
+size_t alias_hash(char *name);
 //--------------
 
 //ERROR FUNCTION
@@ -127,6 +135,7 @@ int main(int argc, char *argv[])
 
 	free(line);
 	clear_history(&history);
+	clear_aliases(&tmp_table);
 	return 0;
 }
 
@@ -195,12 +204,6 @@ status_t parse_line(char *line, size_t chars_read, command_t *command)
 		return MEMORY_ERROR;
 	}
 
-	size_t i;
-	for (i = 0; i < command->argc; i++)
-	{
-		printf("%s\n", command->arguments[i]);
-	}
-	
 	//determine if the process should be run in the background
 	command->background = 0;
 	if (strcmp(command->arguments[command->argc - 1], "&") == 0)
@@ -310,6 +313,7 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 			{
 				command_t *old_command = &history->commands[(history->num_commands - 1) % history->length];
 				print_command(old_command);
+				fprintf(stdout, "\n");
 				return execute(history, old_command);
 			}
 			else
@@ -333,9 +337,9 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 			}
 
 			size_t index = (number - 1) % history->length;
-			printf("number = %zu, index = %zu\n", number, index);
 			command_t *old_command = &history->commands[index];
 			print_command(old_command);
+			fprintf(stdout, "\n");
 			return execute(history, old_command);
 		}
 	}
@@ -360,6 +364,14 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 	if (strcmp(command->arguments[0], "alias") == 0)
 	{
 		*is_builtin = 1;
+
+		//one for "alias", one for NULL pointer
+		if (command->argc == 2)
+		{
+			//print all the aliases
+			print_aliases(&tmp_table);
+			return SUCCESS;
+		}
 		
 		//one for "alias", one for the new name, one for the command, one for the NULL pointer
 		if (command->argc < 4)
@@ -367,8 +379,14 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 			return ARGS_ERROR;
 		}
 
-		status_t error = add_alias(&tmp_table, command->arguments[1], command->arguments[2]);
-		return error;
+		return add_alias(&tmp_table, command->arguments[1], command->arguments[2], command->argc > 4);
+	}
+
+	alias_t *alias;
+	if ((alias =  find_alias(&tmp_table, command->arguments[0])) != NULL)
+	{
+		*is_builtin = 1;
+		return execute(history, alias->command);
 	}
 
 	*is_builtin = 0;
@@ -427,12 +445,16 @@ status_t copy_command(command_t *destination, command_t *source)
 				free(new_array[j]);
 			}
 			free(new_array);
+			return MEMORY_ERROR;
 		}
 	}
 	new_array[i] = NULL;
+
 	destination->arguments = new_array;
 	destination->argc = source->argc;
 	destination->background = source->background;
+
+	return SUCCESS;
 }
 
 void add_to_history(history_t *history, command_t *command)
@@ -481,15 +503,22 @@ void print_history(history_t *history)
 	{
 		ssize_t current_index = (start_index - (ssize_t) i) % (ssize_t) history->length;
 		current_index += current_index < 0 ? history->length : 0;
+		fprintf(stdout, "%zu ", history->commands[current_index].number);
 		print_command(&history->commands[current_index]);
+		fprintf(stdout, "\n");
 	}		
 }
 
 void print_command(command_t *command)
 {
-	fprintf(stdout, "%zu", command->number);
+	if (command->argc < 1)
+	{
+		return;
+	}
+
+	fprintf(stdout, "%s", command->arguments[0]);
 	size_t j;
-	for (j = 0; command->arguments[j]; j++)
+	for (j = 1; command->arguments[j]; j++)
 	{
 		fprintf(stdout, " %s", command->arguments[j]);
 	}
@@ -498,15 +527,50 @@ void print_command(command_t *command)
 	{
 		fprintf(stdout, " &");
 	}
-
-	fprintf(stdout, "\n");
 }
 
-status_t add_alias(alias_table_t *table, char *name, char *command)
+void print_aliases(alias_table_t *table)
 {
-	//remove the quotes from the command
+	size_t i;
+	for (i = 0; i < ALIAS_BUCKETS; i++)
+	{
+		alias_t *entry = table->alias_entries[i];
+		while (entry != NULL)
+		{
+			fprintf(stdout, "%s: ", entry->alias);
+			print_command(entry->command);
+			fprintf(stdout, "\n");
+			entry = entry->next;
+		}
+	}
+}
+
+status_t add_alias(alias_table_t *table, char *name, char *command, unsigned short overwrite)
+{
+	alias_t *entry = find_alias(table, name);
+	if (entry != NULL)
+	{
+		if (!overwrite)
+		{
+			return EXISTS_ERROR;
+		}
+
+		remove_alias(table, name);
+	}
+
+	//remove the quote from the command
+	if (command[0] != '"')
+	{
+		return FORMAT_ERROR;
+	}
 	command++;
 	size_t chars_read = strlen(command);
+
+	if (command[chars_read - 1] != '"')
+	{
+		return FORMAT_ERROR;
+	}
+
 	command_t new_command;
 	status_t error = parse_line(command, chars_read, &new_command);
 	if (error != SUCCESS)
@@ -514,9 +578,121 @@ status_t add_alias(alias_table_t *table, char *name, char *command)
 		return error;
 	}
 
+	command_t *command_copy = malloc(sizeof *command_copy);
+	if (command_copy == NULL)
+	{
+		free(new_command.arguments);
+		return MEMORY_ERROR;
+	}
+
+	error = copy_command(command_copy, &new_command);
+	free(new_command.arguments);
+	if (error != SUCCESS)
+	{
+		free(command_copy);
+		return error;
+	}
+
+	alias_t *new_alias = malloc(sizeof *new_alias);
+	if (new_alias == NULL)
+	{
+		free(command_copy);
+		return MEMORY_ERROR;
+	}
+	new_alias->command = command_copy;
+	new_alias->alias = strdup(name);
+	if (new_alias->alias == NULL)
+	{
+		free(command_copy);
+		free(new_alias);
+		return MEMORY_ERROR;
+	}
+
+	size_t hash_val = alias_hash(name);
+	new_alias->next = table->alias_entries[hash_val];
+	table->alias_entries[hash_val] = new_alias;
+
 	return SUCCESS;
 }
 
+alias_t *find_alias(alias_table_t *table, char *alias)
+{
+	size_t hash_val = alias_hash(alias);
+	alias_t *entry = table->alias_entries[hash_val];
+	while (entry != NULL)
+	{
+		if (strcmp(entry->alias, alias) == 0)
+		{
+			return entry;
+		}
+
+		entry = entry->next;
+	}
+
+	return NULL;
+}
+
+void remove_alias(alias_table_t *table, char *name)
+{
+	size_t hash_val = alias_hash(name);
+	alias_t *entry = table->alias_entries[hash_val];
+
+	if (entry == NULL)
+	{
+		return;
+	}
+
+	//handle case where alias is head of the linked list
+	if (strcmp(entry->alias, name) == 0)
+	{
+		alias_t *to_be_freed = entry;
+		table->alias_entries[hash_val] = to_be_freed->next;
+		free_command(to_be_freed->command);
+		free(to_be_freed->command);
+		free(to_be_freed->alias);
+		free(to_be_freed);
+		return;
+	}
+
+	//handle case where alias is deeper in list
+	while (entry != NULL)
+	{
+		if (entry->next && strcmp(entry->next->alias, name) == 0)
+		{
+			alias_t *to_be_freed = entry->next;
+			entry->next = to_be_freed->next;
+			free_command(to_be_freed->command);
+			free(to_be_freed->command);
+			free(to_be_freed->alias);
+			free(to_be_freed);
+			return;
+		}
+		entry = entry->next;
+	}	
+}
+
+void clear_aliases(alias_table_t *table)
+{
+	size_t i;
+	for (i = 0; i < ALIAS_BUCKETS; i++)
+	{
+		alias_t *entry = table->alias_entries[i];
+		while (entry != NULL)
+		{
+			alias_t *tmp = entry->next;
+			free_command(entry->command);
+			free(entry->command);
+			free(entry->alias);
+			free(entry);
+			entry = tmp;
+		}
+	}
+}
+
+size_t alias_hash(char *name)
+{
+	return hash(name) % ALIAS_BUCKETS;
+}
 
 void error_message(status_t error_code)
 {
@@ -551,6 +727,11 @@ void error_message(status_t error_code)
 		case CD_ERROR:
 			fprintf(stderr, "Error: Could not change to that directory.");
 			break;
+		case EXISTS_ERROR:
+			fprintf(stderr, "Error: That alias already exists.");
+			break;
+		case FORMAT_ERROR:
+			fprintf(stderr, "Error: Incorrect format.");
 		default:
 			fprintf(stderr, "Error: Unknown error.");
 	}
