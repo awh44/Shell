@@ -14,10 +14,11 @@
 #define NO_COMMANDS      7
 #define NO_EXIST_ERROR   8
 #define NUMBER_ERROR     9
-#define NO_DIRECTORY    10
+#define ARGS_ERROR    10
 #define CD_ERROR        11
 
 #define HISTORY_LENGTH 10
+#define ALIAS_BUCKETS  128
 
 #define ASCII_0 48
 #define ASCII_9 57
@@ -41,19 +42,65 @@ typedef struct
 	size_t length;
 } history_t;
 
+typedef struct
+{
+	char *alias;
+	command_t *command;
+} alias_t;
+
+typedef struct
+{
+	alias_t aliases[ALIAS_BUCKETS];
+	size_t buckets;
+} alias_table_t;
+
+typedef struct
+{
+	char **path;
+	history_t *history;
+	alias_table_t *aliases;
+} environment_t;
+
+static alias_table_t tmp_table;
+
+
 unsigned short eval_print(char *line, size_t size, history_t *history);
+
+//PARSING FUNCTIONS
 status_t parse_line(char *line, size_t chars_read, command_t *command);
 void trim(char *line, size_t length);
-char **split(char *s, char delim, size_t *number);
+char **split(char *s, char delim, unsigned short retain_quotes, size_t *number);
+//----------------
+
+//EXECUTION FUNCTIONS
 status_t execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin);
 status_t execute(history_t *history, command_t *command);
-void add_to_history(history_t *history, command_t *command);
+//------------------
+
+//COMMAND FUNCTIONS
+status_t copy_command(command_t *destination, command_t *source);
+void print_command(command_t *command);
 void free_command(command_t *command);
+//-----------------
+
+//HISTORY and COMMAND FUNCTIONS
+void add_to_history(history_t *history, command_t *command);
 void clear_history(history_t *history);
 void print_history(history_t *history);
-void print_command(command_t *command);
+//-----------------------------
+
+//ALIAS FUNCTIONS
+status_t add_alias(alias_table_t *table, char *name, char *command);
+//--------------
+
+//ERROR FUNCTION
 void error_message(status_t error_code);
+//-------------
+
+//HELPER FUNCTIONS
 status_t convert(char *s, size_t *value);
+size_t hash(char *str);
+//----------------
 
 int main(int argc, char *argv[])
 {
@@ -142,10 +189,16 @@ status_t parse_line(char *line, size_t chars_read, command_t *command)
 	trim(line, chars_read);
 
 	//split the line into the arguments array
-	command->arguments = split(line, ' ', &command->argc);
+	command->arguments = split(line, ' ', 1, &command->argc);
 	if (command->arguments == NULL)
 	{
 		return MEMORY_ERROR;
+	}
+
+	size_t i;
+	for (i = 0; i < command->argc; i++)
+	{
+		printf("%s\n", command->arguments[i]);
 	}
 	
 	//determine if the process should be run in the background
@@ -153,7 +206,7 @@ status_t parse_line(char *line, size_t chars_read, command_t *command)
 	if (strcmp(command->arguments[command->argc - 1], "&") == 0)
 	{
 		command->background = 1;
-		(command->arguments)[command->argc - 1] = NULL;
+		command->arguments[command->argc - 1] = NULL;
 	}
 	else
 	{
@@ -195,32 +248,44 @@ void trim(char *line, size_t length)
 	line[end + 1] = '\0';
 }
 
-char **split(char *s, char delim, size_t *number)
+char **split(char *s, char delim, unsigned short retain_quotes, size_t *number)
 {
+	*number = 0;
     char **ret_val = NULL;
-    *number = 0;
+	unsigned short in_quotes = 0;
     char *start_pos = s;
     size_t i;
     for (i = 0; s[i]; i++)
     {
-        if (s[i] == delim || s[i + 1] == '\0')
-        {
-            (*number)++;
+		if (s[i] == '"')
+		{
+			in_quotes = !in_quotes;
+		}
+
+		if ((s[i] == delim && !in_quotes) || (s[i + 1] == '\0'))
+		{
+			//reallocate space for another element in the array
+			(*number)++;
 			char **tmp = realloc(ret_val, *number * sizeof *ret_val);
+			//if space can't be allocated, free the memory allocated so far and return NULL
 			if (tmp == NULL)
 			{
 				free(ret_val);
 				return NULL;
 			}
-
+			//otherwise, update the array's value
 			ret_val = tmp;
-            if (s[i] == delim)
+
+			//next, indicate that the string starts at the given position. If it's the case where a
+			//delimiter has been found, insert a null terminator to split the string up
+			if (s[i] == delim)
 			{
 				s[i] = '\0';
 			}
-            ret_val[*number - 1] = start_pos;
+			ret_val[*number - 1] = start_pos;
 
-            start_pos = s + i + 1;
+			//update the starting position to be 1 after the delimiter	
+			start_pos = s + i + 1;
         }
     }
     
@@ -281,7 +346,7 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 		//one for "cd", one for the directory, one for the NULL pointer
 		if (command->argc < 3)
 		{
-			return NO_DIRECTORY;
+			return ARGS_ERROR;
 		}
 
 		if (chdir(command->arguments[1]) < 0)
@@ -290,6 +355,20 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 		}
 
 		return SUCCESS;
+	}
+
+	if (strcmp(command->arguments[0], "alias") == 0)
+	{
+		*is_builtin = 1;
+		
+		//one for "alias", one for the new name, one for the command, one for the NULL pointer
+		if (command->argc < 4)
+		{
+			return ARGS_ERROR;
+		}
+
+		status_t error = add_alias(&tmp_table, command->arguments[1], command->arguments[2]);
+		return error;
 	}
 
 	*is_builtin = 0;
@@ -327,6 +406,35 @@ status_t execute(history_t *history, command_t *command)
 	return SUCCESS;
 }
 
+status_t copy_command(command_t *destination, command_t *source)
+{
+	destination->number = source->number;
+	char **new_array = malloc(source->argc * sizeof *destination->arguments);
+	if (new_array == NULL)
+	{
+		return MEMORY_ERROR;
+	}
+
+	size_t i;
+	for (i = 0; i < source->argc - 1; i++)
+	{
+		new_array[i] = strdup(source->arguments[i]);
+		if (new_array[i] == NULL)
+		{
+			size_t j;
+			for (j = i - 1; j >= 0; j--)
+			{
+				free(new_array[j]);
+			}
+			free(new_array);
+		}
+	}
+	new_array[i] = NULL;
+	destination->arguments = new_array;
+	destination->argc = source->argc;
+	destination->background = source->background;
+}
+
 void add_to_history(history_t *history, command_t *command)
 {
 	size_t index = history->num_commands % history->length;
@@ -335,19 +443,8 @@ void add_to_history(history_t *history, command_t *command)
 	//save the old command's values, in case it needs to be freed later
 	command_t old_command = history->commands[index];
 
+	copy_command(&history->commands[index], command);
 	history->commands[index].number = history->num_commands;
-
-	char **new_array = malloc(command->argc * sizeof *new_array);
-	size_t i;
-	for (i = 0; i < command->argc - 1; i++)
-	{
-		new_array[i] = strdup(command->arguments[i]);
-	}
-	new_array[i] = NULL;
-
-	history->commands[index].arguments = new_array;
-	history->commands[index].background = command->background;
-	history->commands[index].argc = command->argc;
 
 	if (history->num_commands > history->length)
 	{
@@ -405,6 +502,21 @@ void print_command(command_t *command)
 	fprintf(stdout, "\n");
 }
 
+status_t add_alias(alias_table_t *table, char *name, char *command)
+{
+	//remove the quotes from the command
+	command++;
+	size_t chars_read = strlen(command);
+	command_t new_command;
+	status_t error = parse_line(command, chars_read, &new_command);
+	if (error != SUCCESS)
+	{
+		return error;
+	}
+
+	return SUCCESS;
+}
+
 
 void error_message(status_t error_code)
 {
@@ -433,8 +545,8 @@ void error_message(status_t error_code)
 		case NUMBER_ERROR:
 			fprintf(stderr, "Error: Number formatted incorrectly.");
 			break;
-		case NO_DIRECTORY:
-			fprintf(stderr, "Error: No directory included.");
+		case ARGS_ERROR:
+			fprintf(stderr, "Error: Not enough arguments included.");
 			break;
 		case CD_ERROR:
 			fprintf(stderr, "Error: Could not change to that directory.");
@@ -461,4 +573,20 @@ status_t convert(char *s, size_t *value)
 	}
 
 	return SUCCESS;
+}
+
+/*
+	djb2 algorithm - see http://www.cse.yorku.ca/~oz/hash.html
+*/
+size_t hash(char *str)
+{
+	size_t hash_val = 5381;
+	char c;
+
+	while (c = *str++)
+	{
+		hash_val = ((hash_val << 5) + hash_val) + c;
+	}
+
+	return hash_val;
 }
