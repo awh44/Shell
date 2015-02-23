@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,6 +32,7 @@
 #define DUP2_ERROR      16
 #define NOT_OPEN        17
 #define INVALID_VAR     18
+#define DIR_ERROR       19
 
 #define MIN(a, b) (a) < (b) ? (a) : (b)
 
@@ -203,6 +205,7 @@ status_t alias_command(environment_t *environment, command_t *command);
   * @return a status code indicating whether an error occurred during execution of the function
   */
 status_t script_command(environment_t *environment, command_t *command);
+
 /**
   * Handles an endscript command, ending the script and closing the file if possible, returning an
   * error otherwise. Sets the appropriate variables in envrionment and closes files as needed.
@@ -212,7 +215,22 @@ status_t script_command(environment_t *environment, command_t *command);
   */
 status_t endscript_command(environment_t *environment, command_t *command);
 
+/**
+  * Handles a "set", setting the correct variable in the environment if possible, returning an error
+  * otherwise.
+  * @param environment the current environment to set the variable into
+  * @param command     the set command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t set_command(environment_t *environment, command_t *command);
+
+/**
+  * Handles a "set path", setting the correct variable in the environment if possible, returning an error
+  * otherwise.
+  * @param environment the current environment to set the path variable into
+  * @param command     the set path command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t set_path_command(environment_t *environment, command_t *command);
 //-----------------------
 
@@ -221,6 +239,17 @@ status_t copy_command(command_t *destination, command_t *source);
 void print_command(command_t *command);
 void free_command(command_t *command);
 //-----------------
+
+//ENVIRONMENT FUNCTIONS
+void clear_environment(environment_t *environment);
+//---------------------
+
+//PATH FUNCTIONS
+status_t set_path(path_t *path, command_t *command);
+status_t resize_initialize_path(path_t *path, size_t num_dirs);
+unsigned short dir_accessible(char *dir);
+void clear_path(path_t *path);
+//--------------
 
 //HISTORY FUNCTIONS
 status_t add_to_history(history_t *history, command_t *command);
@@ -275,12 +304,7 @@ int main(int argc, char *argv[])
 	}
 
 	free(line);
-	clear_history(environment.history);
-	clear_aliases(environment.aliases);
-	if (environment.script_file >= 0)
-	{
-		close(environment.script_file);
-	}
+	clear_environment(&environment);
 	return 0;
 }
 
@@ -306,24 +330,13 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 		error = execute(environment, &command);
 	}
 
-	if (error == DUP2_ERROR)
-	{
-		error_message(error);
-		free(command.arguments);
-		free(line);
-		clear_history(environment->history);
-		clear_aliases(environment->aliases);
-		close(environment->script_file);
-		exit(1);
-	}
-	else if (error == EXEC_ERROR)
+	if (error == EXEC_ERROR || error == DUP2_ERROR)
 	{
 		//child process could not execute execvp, so free its memory and exit
 		error_message(error);
 		free(command.arguments);
 		free(line);
-		clear_history(environment->history);
-		clear_aliases(environment->aliases);
+		clear_environment(environment);
 		//if the process made it to EXEC, it must have already closed the script_file, if it was
 		//open, so it doesn't have to be closed here
 		exit(1);
@@ -668,64 +681,7 @@ status_t set_path_command(environment_t *environment, command_t *command)
 		return FORMAT_ERROR;
 	}
 
-	//one for "set", one for "path", one for "=", one for NULL pointer
-	size_t num_dirs = command->argc - 4;
-	if (num_dirs > environment->path->num_dirs)
-	{	
-		printf("Enlarging array.\n");
-		environment->path->dirs = realloc(environment->path->dirs, num_dirs * sizeof *environment->path->dirs);
-		size_t i;
-		for (i = environment->path->num_dirs; i < num_dirs; i++)
-		{
-			string_initialize(environment->path->dirs + i);
-		}
-	}
-	else if (num_dirs < environment->path->num_dirs)
-	{
-		printf("Shrinking array.\n");
-		size_t i;
-		for (i = num_dirs; i < environment->path->num_dirs; i++)
-		{
-			string_uninitialize(environment->path->dirs + i);
-		}
-		environment->path->dirs = realloc(environment->path->dirs, num_dirs * sizeof *environment->path->dirs);
-	}
-	environment->path->num_dirs = num_dirs;
-
-	size_t current_index = 0;
-	size_t i;
-	for (i = 0; i < num_dirs; i++)
-	{
-		//adjust the argument to deal with the parentheses; do the num_dirs - 1 case first to handle
-		//the case of only one directory in the path correctly (otherwise, the ')' wouldn't be
-		//eliminated correctly)
-		char *argument = command->arguments[i + 3];
-		if (i == num_dirs - 1)
-		{
-			argument[last_length - 1] = '\0';
-		}
-
-		if (i == 0)
-		{
-			argument++;
-		}
-				
-		string_assign_from_char_array(environment->path->dirs + current_index, argument);
-
-		if (i == num_dirs - 1)
-		{
-			argument[last_length - 1] = ')';
-		}
-
-		current_index++;
-	}
-
-	for (i = 0; i < num_dirs; i++)
-	{
-		printf("%s\n", string_c_str(environment->path->dirs + i));
-	}
-
-	return SUCCESS;
+	return set_path(environment->path, command);
 }
 
 status_t execute(environment_t *environment, command_t *command)
@@ -843,6 +799,131 @@ void free_command(command_t *command)
 		free(command->arguments[i]);
 	}
 	free(command->arguments);
+}
+
+void clear_environment(environment_t *environment)
+{
+	clear_path(environment->path);
+	clear_history(environment->history);
+	clear_aliases(environment->aliases);
+	if (environment->script_file >= 0)
+	{
+		close(environment->script_file);
+	}
+	environment->script_file = -1;
+}
+
+status_t set_path(path_t *path, command_t *command)
+{
+	//one for "set", one for "path", one for "=", one for NULL pointer
+	status_t error = resize_initialize_path(path, command->argc - 4);
+	if (error != SUCCESS)
+	{
+		return error;
+	}
+
+	size_t last_length = strlen(command->arguments[command->argc - 2]);
+	size_t current_index = 0;
+	size_t i;
+	for (i = 0; i < path->num_dirs; i++)
+	{
+		//adjust the argument to deal with the parentheses; do the num_dirs - 1 case first to handle
+		//the case of only one directory in the path correctly (otherwise, the ')' wouldn't be
+		//eliminated correctly)
+		char *argument = command->arguments[i + 3];
+		if (i == path->num_dirs - 1)
+		{
+			argument[last_length - 1] = '\0';
+		}
+
+		if (i == 0)
+		{
+			argument++;
+		}
+			
+		if (dir_accessible(argument))
+		{
+			string_assign_from_char_array(path->dirs + current_index, argument);
+			current_index++;
+		}
+		else
+		{
+			fprintf(stderr, "Error: Could not add %s to the path.\n", argument);
+		}
+
+		if (i == path->num_dirs - 1)
+		{
+			argument[last_length - 1] = ')';
+		}
+
+	}
+
+	//uninitialize any strings that will now be unused (because directories could not be used in the
+	//path)
+	for (i = current_index; i < path->num_dirs; i++)
+	{
+		string_uninitialize(path->dirs + i);
+	}
+
+	path->num_dirs = current_index;
+	path->dirs = realloc(path->dirs, path->num_dirs * sizeof *path->dirs);
+	/*
+	for (i = 0; i < path->num_dirs; i++)
+	{
+		printf("%s\n", string_c_str(path->dirs + i));
+	}
+	*/
+
+	return SUCCESS;
+}
+
+status_t resize_initialize_path(path_t *path, size_t num_dirs)
+{
+	if (num_dirs > path->num_dirs)
+	{	
+		path->dirs = realloc(path->dirs, num_dirs * sizeof *path->dirs);
+		size_t i;
+		for (i = path->num_dirs; i < num_dirs; i++)
+		{
+			string_initialize(path->dirs + i);
+		}
+	}
+	else if (num_dirs < path->num_dirs)
+	{
+		size_t i;
+		for (i = num_dirs; i < path->num_dirs; i++)
+		{
+			string_uninitialize(path->dirs + i);
+		}
+		path->dirs = realloc(path->dirs, num_dirs * sizeof *path->dirs);
+	}
+
+	path->num_dirs = num_dirs;
+	return SUCCESS;
+}
+
+unsigned short dir_accessible(char *dir)
+{
+	DIR *test_dir;
+	if ((test_dir = opendir(dir)) == NULL)
+	{
+		return 0;
+	}
+	else
+	{
+		closedir(test_dir);
+		return 1;
+	}
+}
+
+void clear_path(path_t *path)
+{
+	size_t i;
+	for (i = 0; i < path->num_dirs; i++)
+	{
+		string_uninitialize(path->dirs + i);
+	}
+	free(path->dirs);
 }
 
 void clear_history(history_t *history)
@@ -1108,6 +1189,9 @@ void error_message(status_t error_code)
 			break;
 		case INVALID_VAR:
 			fprintf(stderr, "Error: That value cannot currently be set.");
+			break;
+		case DIR_ERROR:
+			fprintf(stderr, "Error: Could not add directory to path: ");
 			break;
 		default:
 			fprintf(stderr, "Error: Unknown error.");
