@@ -337,6 +337,7 @@ void initialize_shell(environment_t *environment)
 	}
 
 	free(line);
+	fclose(file);
 }
 
 unsigned short eval_print(char *line, size_t chars_read, environment_t *environment)
