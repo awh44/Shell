@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@
 #define CD_ERROR        11
 #define EXISTS_ERROR    12
 #define FORMAT_ERROR    13
+#define OPEN_ERROR      14
 
 #define HISTORY_LENGTH 10
 #define ALIAS_BUCKETS  128
@@ -54,7 +56,6 @@ typedef struct alias_t
 typedef struct
 {
 	alias_t *alias_entries[ALIAS_BUCKETS];
-	size_t buckets;
 } alias_table_t;
 
 typedef struct
@@ -62,12 +63,10 @@ typedef struct
 	char **path;
 	history_t *history;
 	alias_table_t *aliases;
+	int script_file;
 } environment_t;
 
-static alias_table_t tmp_table;
-
-
-unsigned short eval_print(char *line, size_t size, history_t *history);
+unsigned short eval_print(char *line, size_t size, environment_t *environment);
 
 //PARSING FUNCTIONS
 status_t parse_line(char *line, size_t chars_read, command_t *command);
@@ -76,7 +75,7 @@ char **split(char *s, char delim, unsigned short retain_quotes, size_t *number);
 //----------------
 
 //EXECUTION FUNCTIONS
-status_t execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin);
+status_t execute_builtin(environment_t *environment, command_t *command, unsigned short *is_builtin);
 status_t execute(history_t *history, command_t *command);
 //------------------
 
@@ -87,7 +86,7 @@ void free_command(command_t *command);
 //-----------------
 
 //HISTORY FUNCTIONS
-void add_to_history(history_t *history, command_t *command);
+status_t add_to_history(history_t *history, command_t *command);
 void clear_history(history_t *history);
 void print_history(history_t *history);
 //-----------------------------
@@ -112,11 +111,15 @@ size_t hash(char *str);
 
 int main(int argc, char *argv[])
 {
+	history_t history = {0};
+	history.length = HISTORY_LENGTH;
+	alias_table_t aliases = {0};
+
+	environment_t environment = { NULL, &history, &aliases, -1 };
+
 	int cont = 1;
 	char *line = NULL;
 	size_t size;
-	history_t history = {0};
-	history.length = HISTORY_LENGTH;
 
 	while (cont)
 	{
@@ -129,17 +132,17 @@ int main(int argc, char *argv[])
 		}
 		else
 		{
-			cont = eval_print(line, chars_read, &history);
+			cont = eval_print(line, chars_read, &environment);
 		}
 	}
 
 	free(line);
-	clear_history(&history);
-	clear_aliases(&tmp_table);
+	clear_history(environment.history);
+	clear_aliases(environment.aliases);
 	return 0;
 }
 
-unsigned short eval_print(char *line, size_t chars_read, history_t *history)
+unsigned short eval_print(char *line, size_t chars_read, environment_t *environment)
 {
 	if (strcmp(line, "exit\n") == 0)
 	{
@@ -155,10 +158,10 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 	}
 
 	unsigned short is_builtin;
-	error = execute_builtin(history, &command, &is_builtin);
+	error = execute_builtin(environment, &command, &is_builtin);
 	if (!is_builtin)
 	{
-		error = execute(history, &command);
+		error = execute(environment->history, &command);
 	}
 
 	if (error == EXEC_ERROR)
@@ -167,7 +170,8 @@ unsigned short eval_print(char *line, size_t chars_read, history_t *history)
 		error_message(error);
 		free(command.arguments);
 		free(line);
-		clear_history(history);
+		clear_history(environment->history);
+		clear_aliases(environment->aliases);
 		exit(1);
 	}
 	else if (error != SUCCESS)
@@ -295,18 +299,19 @@ char **split(char *s, char delim, unsigned short retain_quotes, size_t *number)
 	return ret_val;
 }
 
-status_t execute_builtin(history_t *history, command_t *command, unsigned short *is_builtin)
+status_t execute_builtin(environment_t *environment, command_t *command, unsigned short *is_builtin)
 {
 	if (strcmp(command->arguments[0], "history") == 0)
 	{
-		print_history(history);
 		*is_builtin = 1;
+		print_history(environment->history);
 		return SUCCESS;
 	}
 
 	if (command->arguments[0][0] == '!')
 	{
 		*is_builtin = 1;
+		history_t *history = environment->history;
 		if (command->arguments[0][1] == '!')
 		{
 			if (history->num_commands >= 1)
@@ -369,7 +374,7 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 		if (command->argc == 2)
 		{
 			//print all the aliases
-			print_aliases(&tmp_table);
+			print_aliases(environment->aliases);
 			return SUCCESS;
 		}
 		
@@ -379,14 +384,32 @@ status_t execute_builtin(history_t *history, command_t *command, unsigned short 
 			return ARGS_ERROR;
 		}
 
-		return add_alias(&tmp_table, command->arguments[1], command->arguments[2], command->argc > 4);
+		return add_alias(environment->aliases, command->arguments[1], command->arguments[2], command->argc > 4);
 	}
 
 	alias_t *alias;
-	if ((alias =  find_alias(&tmp_table, command->arguments[0])) != NULL)
+	if ((alias =  find_alias(environment->aliases, command->arguments[0])) != NULL)
 	{
 		*is_builtin = 1;
-		return execute(history, alias->command);
+		return execute(environment->history, alias->command);
+	}
+
+	if (strcmp(command->arguments[0], "script") == 0)
+	{
+		//one for "script", one for filename, one for NULL
+		if (command->argc < 3)
+		{
+			return ARGS_ERROR;
+		}
+
+		int fd;
+		fd = open(command->arguments[1], O_WRONLY);
+		if (fd < 0)
+		{
+			return OPEN_ERROR;
+		}
+
+		environment->script_file = fd;
 	}
 
 	*is_builtin = 0;
@@ -413,7 +436,7 @@ status_t execute(history_t *history, command_t *command)
 	
 	//parent case - child process will either be replaced or will return (in the case of an error),
 	//so will never reach here
-	add_to_history(history, command);
+	status_t error = add_to_history(history, command);
 	//if it's now a background command, then don't wait for it
 	if (!command->background)
 	{
@@ -421,7 +444,7 @@ status_t execute(history_t *history, command_t *command)
 		waitpid(pid, &status, 0);
 	}
 
-	return SUCCESS;
+	return error;
 }
 
 status_t copy_command(command_t *destination, command_t *source)
@@ -457,7 +480,7 @@ status_t copy_command(command_t *destination, command_t *source)
 	return SUCCESS;
 }
 
-void add_to_history(history_t *history, command_t *command)
+status_t add_to_history(history_t *history, command_t *command)
 {
 	size_t index = history->num_commands % history->length;
 	history->num_commands++;
@@ -465,13 +488,19 @@ void add_to_history(history_t *history, command_t *command)
 	//save the old command's values, in case it needs to be freed later
 	command_t old_command = history->commands[index];
 
-	copy_command(&history->commands[index], command);
+	status_t error = copy_command(&history->commands[index], command);
+	if (error != SUCCESS)
+	{
+		return error;
+	}
 	history->commands[index].number = history->num_commands;
 
 	if (history->num_commands > history->length)
 	{
 		free_command(&old_command);
 	}
+
+	return SUCCESS;
 }
 
 void free_command(command_t *command)
@@ -732,6 +761,10 @@ void error_message(status_t error_code)
 			break;
 		case FORMAT_ERROR:
 			fprintf(stderr, "Error: Incorrect format.");
+			break;
+		case OPEN_ERROR:
+			fprintf(stderr, "Error: Could not open file.");
+			break;
 		default:
 			fprintf(stderr, "Error: Unknown error.");
 	}
