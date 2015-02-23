@@ -108,7 +108,7 @@ typedef struct
 	history_t *history;
 	alias_table_t *aliases;
 	int script_file;
-
+	unsigned short verbose;
 } environment_t;
 
 
@@ -236,6 +236,15 @@ status_t set_command(environment_t *environment, command_t *command);
   * @return a status code indicating whether an error occurred during execution of the function
   */
 status_t set_path_command(environment_t *environment, command_t *command);
+
+/**
+  * Handles a "set verbose", setting the correct variable in the environment if possible, returning an error
+  * otherwise.
+  * @param environment the current environment to set the verbose variable into
+  * @param command     the set verbose command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
+status_t set_verbose_command(environment_t *environment, command_t *command);
 //-----------------------
 
 //COMMAND FUNCTIONS
@@ -253,6 +262,7 @@ status_t set_path(path_t *path, command_t *command);
 status_t resize_initialize_path(path_t *path, size_t num_dirs);
 unsigned short dir_accessible(char *dir);
 void clear_path(path_t *path);
+void print_path(path_t *path);
 //--------------
 
 //HISTORY FUNCTIONS
@@ -285,8 +295,7 @@ int main(int argc, char *argv[])
 	history_t history = {0};
 	history.length = HISTORY_LENGTH;
 	alias_table_t aliases = {0};
-
-	environment_t environment = { &path, &history, &aliases, -1 };
+	environment_t environment = { &path, &history, &aliases, -1, 1 };
 	initialize_shell(&environment);
 
 	int cont = 1;
@@ -353,6 +362,12 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 	{
 		error_message(error);
 		return 1;
+	}
+
+	if (environment->verbose)
+	{
+		print_command(&command);
+		fprintf(stdout, "\n");
 	}
 
 	unsigned short is_builtin;
@@ -678,7 +693,18 @@ status_t set_command(environment_t *environment, command_t *command)
 
 	if (strcmp(command->arguments[1], "path") == 0)
 	{
-		return set_path_command(environment, command);
+		status_t error = set_path_command(environment, command);
+		if (error == SUCCESS && environment->verbose)
+		{
+			print_path(environment->path);
+		}
+
+		return error;
+	}
+
+	if (strcmp(command->arguments[1], "verbose") == 0)
+	{
+		return set_verbose_command(environment, command);
 	}
 
 	return INVALID_VAR;
@@ -716,6 +742,29 @@ status_t set_path_command(environment_t *environment, command_t *command)
 	return set_path(environment->path, command);
 }
 
+status_t set_verbose_command(environment_t *environment, command_t *command)
+{
+	//one for "set", one for "verbose", one for "on/off", one for NULL pointer
+	if (command->argc < 4)
+	{
+		return ARGS_ERROR;
+	}
+
+	if (strcmp(command->arguments[2], "on") == 0)
+	{
+		environment->verbose = 1;
+		return SUCCESS;
+	}
+
+	if (strcmp(command->arguments[2], "off") == 0)
+	{
+		environment->verbose = 0;
+		return SUCCESS;
+	}
+
+	return FORMAT_ERROR;
+}
+
 status_t execute(environment_t *environment, command_t *command)
 {
 	pid_t pid = fork();
@@ -749,6 +798,10 @@ status_t execute(environment_t *environment, command_t *command)
 		}
 		//have child execute the desired program
 		//try the command alone by itself first, so that full paths can work
+		if (environment->verbose)
+		{
+			fprintf(stdout, "Trying to execute at path %s...\n", command->arguments[0]);
+		}
 		execv(command->arguments[0], command->arguments);
 
 		//if that does not work, then try appending the command to all of the directories in the
@@ -757,9 +810,14 @@ status_t execute(environment_t *environment, command_t *command)
 		for (i = 0; i < environment->path->num_dirs; i++)
 		{
 			string_concatenate_char_array(environment->path->dirs + i, command->arguments[0]);
-			execv(string_c_str(environment->path->dirs + i), command->arguments);
+			char *c_str = string_c_str(environment->path->dirs + i);
+			if (environment->verbose)
+			{
+				fprintf(stdout, "Trying to execute at path %s...\n", c_str);
+			}
+			execv(c_str, command->arguments);
 		}
-		
+
 		return EXEC_ERROR;
 	}
 	
@@ -910,13 +968,7 @@ status_t set_path(path_t *path, command_t *command)
 
 	path->num_dirs = current_index;
 	path->dirs = realloc(path->dirs, path->num_dirs * sizeof *path->dirs);
-	/*
-	for (i = 0; i < path->num_dirs; i++)
-	{
-		printf("%s\n", string_c_str(path->dirs + i));
-	}
-	*/
-
+	
 	return SUCCESS;
 }
 
@@ -967,6 +1019,15 @@ void clear_path(path_t *path)
 		string_uninitialize(path->dirs + i);
 	}
 	free(path->dirs);
+}
+
+void print_path(path_t *path)
+{
+	size_t i;
+	for (i = 0; i < path->num_dirs; i++)
+	{
+		fprintf(stdout, "%s\n", string_c_str(path->dirs + i));
+	}
 }
 
 void clear_history(history_t *history)
