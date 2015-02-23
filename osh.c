@@ -332,7 +332,7 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 
 	if (error == EXEC_ERROR || error == DUP2_ERROR)
 	{
-		//child process could not execute execvp, so free its memory and exit
+		//child process could not execute execv, so free its memory and exit
 		error_message(error);
 		free(command.arguments);
 		free(line);
@@ -716,10 +716,19 @@ status_t execute(environment_t *environment, command_t *command)
 			environment->script_file = -1;
 		}
 		//have child execute the desired program
-		if (execvp(command->arguments[0], command->arguments) < 0)
+		//try the command alone by itself first, so that full paths can work
+		execv(command->arguments[0], command->arguments);
+
+		//if that does not work, then try appending the command to all of the directories in the
+		//path, in order
+		size_t i;
+		for (i = 0; i < environment->path->num_dirs; i++)
 		{
-			return EXEC_ERROR;
+			string_concatenate_char_array(environment->path->dirs + i, command->arguments[0]);
+			execv(string_c_str(environment->path->dirs + i), command->arguments);
 		}
+		
+		return EXEC_ERROR;
 	}
 	
 	//parent case - child process will either be replaced or will return (in the case of an error),
@@ -844,6 +853,8 @@ status_t set_path(path_t *path, command_t *command)
 		if (dir_accessible(argument))
 		{
 			string_assign_from_char_array(path->dirs + current_index, argument);
+			//add a backslash no matter what, because any number of slashes is equivalent to one
+			string_concatenate_char_array(path->dirs + current_index, "/");
 			current_index++;
 		}
 		else
