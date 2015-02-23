@@ -15,7 +15,11 @@
 #define ASCII_9 57
 
 #define INITIALIZE_FILE "/.cs543rc"
-
+/*
+ * Define the error constants. These are kind of muddled, because they are a mixture of user (e.g.,
+ * the user input a floating point where an integer was expected) and system (e.g., could not fork a
+ * new process), but they work fine.
+ */
 #define SUCCESS          0
 #define READ_ERROR       1
 #define LINE_EMPTY       3
@@ -120,6 +124,7 @@ void initialize_shell(environment_t *environment);
   * @param line        the line to be evaluated
   * @param size        the size of the line
   * @param environment the current environment in which to evaluate
+  * @return whether the program should continue executing
   */
 unsigned short eval_print(char *line, size_t size, environment_t *environment);
 
@@ -200,6 +205,15 @@ status_t cd_command(command_t *command);
   * @return a status code indicating whether an error occurred during execution of the function
   */
 status_t alias_command(environment_t *environment, command_t *command);
+
+/**
+  * Handles an alias execute command (i.e., the execution of a previously defined alias), executing
+  * of possible and returning an error otherwise
+  * @param environment the current environment in which to execute the aliased command
+  * @param command     the original command as given by the user
+  * @param alias       the aliased command
+  */
+status_t alias_execute_command(environment_t *environment, command_t *original, command_t *alias);
 
 /**
   * Handles a script command (i.e., "script [scriptname]"), starting the script if possible and
@@ -295,7 +309,7 @@ int main(int argc, char *argv[])
 	history_t history = {0};
 	history.length = HISTORY_LENGTH;
 	alias_table_t aliases = {0};
-	environment_t environment = { &path, &history, &aliases, -1, 1 };
+	environment_t environment = { &path, &history, &aliases, -1, 0 };
 	initialize_shell(&environment);
 
 	int cont = 1;
@@ -332,7 +346,7 @@ void initialize_shell(environment_t *environment)
 	string_uninitialize(&file_dir);
 	if (file == NULL)
 	{
-		fprintf(stderr, "Error: Could not open initialization file.\n");
+		error_message(OPEN_ERROR);
 		return;
 	}
 
@@ -542,7 +556,7 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
 	//if the command is an alias, then execute it now
 	if ((alias =  find_alias(environment->aliases, command->arguments[0])) != NULL)
 	{
-		return execute(environment, alias->command);
+		return alias_execute_command(environment, command, alias->command);
 	}
 
 	if (strcmp(command->arguments[0], "script") == 0)
@@ -645,6 +659,43 @@ status_t alias_command(environment_t *environment, command_t *command)
 	}
 
 	return add_alias(environment->aliases, command->arguments[1], command->arguments[2], command->argc > 4);
+}
+
+status_t alias_execute_command(environment_t *environment, command_t *original, command_t *alias)
+{
+	//one for alias command and one for NULL pointer
+	if (original->argc == 2 && !original->background)
+	{
+		return execute(environment, alias);
+	}
+
+	command_t expanded;
+	expanded = *alias;
+	size_t new_argc = original->argc - 2 + alias->argc;
+	expanded.arguments = malloc(new_argc * sizeof *expanded.arguments);
+	memcpy(expanded.arguments, alias->arguments, alias->argc * sizeof *alias->arguments);
+	size_t new_index, old_index = 1;
+	for (new_index = alias->argc - 1; new_index < new_argc; new_index++)
+	{
+		expanded.arguments[new_index] = original->arguments[old_index];
+		old_index++;
+	}
+	
+	if (original->background)
+	{
+		expanded.background = 1;
+	}
+	
+	status_t error = execute(environment, &expanded);
+	free(expanded.arguments);
+	if (error == EXEC_ERROR || error == DUP2_ERROR)
+	{
+		//child process could not execute execv, so free its memory and exit
+		clear_environment(environment);
+		exit(1);
+	}
+
+	return error;
 }
 
 
