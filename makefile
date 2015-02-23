@@ -11,31 +11,31 @@ run: osh
 osh: build/osh.o build/parse.o build/alias.o build/command.o build/environment.o build/history.o build/path.o build/status.o build/string_t.o
 	$(CC) $(OPS) build/osh.o build/parse.o build/alias.o build/command.o build/environment.o build/history.o build/path.o build/status.o build/string_t.o
 
-build/osh.o: osh.c
+build/osh.o: src/osh.c
 	$(OBJ_COMP)
 
-build/parse.o: misc/source/parse.c misc/include/parse.h
+build/parse.o: src/misc/source/parse.c src/misc/include/parse.h
 	$(OBJ_COMP)
 
-build/alias.o: types/source/alias.c types/include/alias.h
+build/alias.o: src/types/source/alias.c src/types/include/alias.h
 	$(OBJ_COMP)
 
-build/command.o: types/source/command.c types/include/command.h
+build/command.o: src/types/source/command.c src/types/include/command.h
 	$(OBJ_COMP)
 	
-build/environment.o: types/source/environment.c types/include/environment.h
+build/environment.o: src/types/source/environment.c src/types/include/environment.h
 	$(OBJ_COMP)
 
-build/history.o: types/source/history.c types/include/history.h
+build/history.o: src/types/source/history.c src/types/include/history.h
 	$(OBJ_COMP)
 
-build/path.o: types/source/path.c types/include/path.h
+build/path.o: src/types/source/path.c src/types/include/path.h
 	$(OBJ_COMP)
 
-build/status.o: types/source/status.c types/include/status.h
+build/status.o: src/types/source/status.c src/types/include/status.h
 	$(OBJ_COMP)
 
-build/string_t.o: types/source/string_t.c types/include/string_t.h types/include/vector_t.h
+build/string_t.o: src/types/source/string_t.c src/types/include/string_t.h src/types/include/vector_t.h
 	$(OBJ_COMP)
 
 clean:
