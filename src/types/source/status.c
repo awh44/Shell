@@ -47,8 +47,11 @@ void error_message(status_t error_code)
 		case ALREADY_OPEN:
 			fprintf(stderr, "Error: Script file already open.");
 			break;
+		case DUP_ERROR:
+			fprintf(stderr, "Error: Could not map file to stdout.");
+			break;
 		case DUP2_ERROR:
-			fprintf(stderr, "Error: Could not map file to stdout or stderr.");
+			fprintf(stderr, "Error: Could not stdout or stderr to file.");
 			break;
 		case NOT_OPEN:
 			fprintf(stderr, "Error: No script file currently open.");

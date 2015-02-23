@@ -1,4 +1,5 @@
 #include <unistd.h>
+
 #include "../include/environment.h"
 
 void clear_environment(environment_t *environment)

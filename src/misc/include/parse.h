@@ -3,8 +3,8 @@
 
 #include <stddef.h>
 
-#include "../../types/include/status.h"
 #include "../../types/include/command.h"
+#include "../../types/include/status.h"
 
 /**
   * Parses the given line made up of chars_read characters, setting the values of command in doing

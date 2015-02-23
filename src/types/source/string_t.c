@@ -1,4 +1,5 @@
 #include <string.h>
+
 #include "../include/string_t.h"
 
 void string_initialize(string_t *s)

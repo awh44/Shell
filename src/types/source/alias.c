@@ -4,8 +4,18 @@
 
 #include "../include/alias.h"
 #include "../../misc/include/parse.h"
-
+/**
+  * Performs a hash of a string based on the djb2 algorithm - see http://www.cse.yorku.ca/~oz/hash.html
+  * @param str the string to be hashed
+  * @return the hash value of the string
+  */
 size_t hash(char *str);
+
+/**
+  * Performs a hash using the given hash function, then mods to fit the hash in the buckets of the
+  * alias_table_t type
+  * @param name the alias name to be hashed
+  */
 size_t alias_hash(char *name);
 
 status_t add_alias(alias_table_t *table, char *name, char *command, unsigned short overwrite)
@@ -169,7 +179,6 @@ void clear_aliases(alias_table_t *table)
 }
 
 /*
-	djb2 algorithm - see http://www.cse.yorku.ca/~oz/hash.html
 */
 size_t hash(char *str)
 {

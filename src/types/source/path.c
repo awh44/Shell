@@ -2,8 +2,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "../include/path.h"
 
+/**
+  * Given the name of a potential directory, this function tries to open it, and if it can, returns
+  * that the directory is accessible, otherwise that it is not
+  * @param dir the name of the directory of which to determine accessibility
+  * @return whether the directory is accessible or not
+  */
 unsigned short dir_accessible(char *dir);
 
 status_t set_path(path_t *path, command_t *command)
@@ -60,6 +67,7 @@ status_t set_path(path_t *path, command_t *command)
         string_uninitialize(path->dirs + i);
     }
 
+	//then reset the number of directories and shrink the array to only the needed size
     path->num_dirs = current_index;
     path->dirs = realloc(path->dirs, path->num_dirs * sizeof *path->dirs);
 

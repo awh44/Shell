@@ -19,7 +19,13 @@
 
 #define INITIALIZE_FILE "/.cs543rc"
 
+/**
+  * Initializes the shell, executing any commands in the user's .cs543rc file and placing any
+  * resulting changes into the given environment
+  * @param environment out param (essentially); all initializiation executed in this environment
+  */
 void initialize_shell(environment_t *environment);
+
 /**
   * Given a line of a particular size, evaluates/executes the resulting command in the given
   * environment, returning whether the program should continue or not after this function as a
@@ -31,7 +37,6 @@ void initialize_shell(environment_t *environment);
   */
 unsigned short eval_print(char *line, size_t size, environment_t *environment);
 
-//EXECUTION FUNCTIONS
 /**
   * If command is a builtin command, this function will execute it, setting is_builtin appropriately
   * @param environment the current environment in which to execute the command
@@ -40,16 +45,15 @@ unsigned short eval_print(char *line, size_t size, environment_t *environment);
   * @return a status code indicating whether an error occurred during execution of the function
   */
 status_t execute_builtin(environment_t *environment, command_t *command, unsigned short *is_builtin);
+
 /**
-  * Execute sthe command indicated by command, in the current environment
+  * Executes the command indicated by command, in the current environment
   * @param environment the current environment in which to execute the command
   * @param command     the command to be executed
   * @return a status code indicating whether an error occurred during execution of the function
   */
 status_t execute_external(environment_t *environment, command_t *command);
-//------------------
 
-//BUILTIN COMMAND HANDLERS
 /**
   * Handles a history command (one executed by !! or !integer), executing if possible and returning
   * an error otherwise
@@ -127,11 +131,15 @@ status_t set_path_command(environment_t *environment, command_t *command);
   * @return a status code indicating whether an error occurred during execution of the function
   */
 status_t set_verbose_command(environment_t *environment, command_t *command);
-//-----------------------
 
-//HELPER FUNCTIONS
+/**
+  * Converts a string pointed to by s to a size_t, setting *value on success and returning an error
+  * otherwise
+  * @param s     the string to be converted
+  * @param value out param; where the converted value will be placed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t convert(char *s, size_t *value);
-//----------------
 
 int main(void)
 {
@@ -153,7 +161,9 @@ int main(void)
 		ssize_t chars_read = getline(&line, &size, stdin);
 		if (chars_read < 0)
 		{
-			error_message(READ_ERROR);
+			cont = 0;
+			fprintf(stdout, "\n");
+			//error_message(READ_ERROR);
 		}
 		else
 		{
@@ -294,6 +304,87 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
 	//if made it to here, command is not a builtin
 	*is_builtin = 0;
 	return SUCCESS;
+}
+
+status_t execute_external(environment_t *environment, command_t *command)
+{
+	pid_t pid = fork();
+	if (pid < 0)
+	{
+		add_to_history(environment->history, command);
+		return FORK_ERROR;
+	}
+	
+	if (pid == 0)
+	{
+		FILE *verbose_out = stdout;
+		if (environment->script_file >= 0)
+		{
+			if ((verbose_out = fdopen(dup(1), "w")) == NULL)
+			{
+				return DUP_ERROR;
+			}
+
+			int result = dup2(environment->script_file, 1);
+			if (result < 0)
+			{
+				fclose(verbose_out);
+				return DUP2_ERROR;
+			}
+			
+			result = dup2(environment->script_file, 2);
+			if (result < 0)
+			{
+				fclose(verbose_out);
+				return DUP2_ERROR;
+			}
+
+			fprintf(stdout, "\n");
+			print_command(command);
+			fprintf(stdout, "\n");
+			close(environment->script_file);
+			environment->script_file = -1;
+		}
+		//have child execute the desired program
+		//try the command alone by itself first, so that full paths can work
+		if (environment->verbose)
+		{
+			fprintf(verbose_out, "Trying to execute at path %s...\n", command->arguments[0]);
+		}
+		execv(command->arguments[0], command->arguments);
+
+		//if that does not work, then try appending the command to all of the directories in the
+		//path, in order
+		size_t i;
+		for (i = 0; i < environment->path->num_dirs; i++)
+		{
+			string_concatenate_char_array(environment->path->dirs + i, command->arguments[0]);
+			char *c_str = string_c_str(environment->path->dirs + i);
+			if (environment->verbose)
+			{
+				fprintf(verbose_out, "Trying to execute at path %s...\n", c_str);
+			}
+			execv(c_str, command->arguments);
+		}
+
+		if (verbose_out != stdout)
+		{
+			fclose(verbose_out);
+		}
+		return EXEC_ERROR;
+	}
+	
+	//parent case - child process will either be replaced or will return (in the case of an error),
+	//so will never reach here
+	status_t error = add_to_history(environment->history, command);
+	//if it's now a background command, then don't wait for it
+	if (!command->background)
+	{
+		int status;
+		waitpid(pid, &status, 0);
+	}
+
+	return error;
 }
 
 status_t history_command(environment_t *environment, command_t *command)
@@ -525,75 +616,6 @@ status_t set_verbose_command(environment_t *environment, command_t *command)
 	}
 
 	return FORMAT_ERROR;
-}
-
-status_t execute_external(environment_t *environment, command_t *command)
-{
-	pid_t pid = fork();
-	if (pid < 0)
-	{
-		add_to_history(environment->history, command);
-		return FORK_ERROR;
-	}
-	
-	if (pid == 0)
-	{
-		if (environment->script_file >= 0)
-		{
-			int result = dup2(environment->script_file, 1);
-			if (result < 0)
-			{
-				return DUP2_ERROR;
-			}
-			
-			result = dup2(environment->script_file, 2);
-			if (result < 0)
-			{
-				return DUP2_ERROR;
-			}
-
-			fprintf(stdout, "\n");
-			print_command(command);
-			fprintf(stdout, "\n");
-			close(environment->script_file);
-			environment->script_file = -1;
-		}
-		//have child execute the desired program
-		//try the command alone by itself first, so that full paths can work
-		if (environment->verbose)
-		{
-			fprintf(stdout, "Trying to execute at path %s...\n", command->arguments[0]);
-		}
-		execv(command->arguments[0], command->arguments);
-
-		//if that does not work, then try appending the command to all of the directories in the
-		//path, in order
-		size_t i;
-		for (i = 0; i < environment->path->num_dirs; i++)
-		{
-			string_concatenate_char_array(environment->path->dirs + i, command->arguments[0]);
-			char *c_str = string_c_str(environment->path->dirs + i);
-			if (environment->verbose)
-			{
-				fprintf(stdout, "Trying to execute at path %s...\n", c_str);
-			}
-			execv(c_str, command->arguments);
-		}
-
-		return EXEC_ERROR;
-	}
-	
-	//parent case - child process will either be replaced or will return (in the case of an error),
-	//so will never reach here
-	status_t error = add_to_history(environment->history, command);
-	//if it's now a background command, then don't wait for it
-	if (!command->background)
-	{
-		int status;
-		waitpid(pid, &status, 0);
-	}
-
-	return error;
 }
 
 status_t convert(char *s, size_t *value)
