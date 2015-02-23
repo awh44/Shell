@@ -688,13 +688,7 @@ status_t alias_execute_command(environment_t *environment, command_t *original, 
 	
 	status_t error = execute(environment, &expanded);
 	free(expanded.arguments);
-	if (error == EXEC_ERROR || error == DUP2_ERROR)
-	{
-		//child process could not execute execv, so free its memory and exit
-		clear_environment(environment);
-		exit(1);
-	}
-
+	
 	return error;
 }
 
