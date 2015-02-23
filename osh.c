@@ -14,6 +14,8 @@
 #define ASCII_0 48
 #define ASCII_9 57
 
+#define INITIALIZE_FILE "/.cs543rc"
+
 #define SUCCESS          0
 #define READ_ERROR       1
 #define LINE_EMPTY       3
@@ -109,6 +111,8 @@ typedef struct
 
 } environment_t;
 
+
+void initialize_shell(environment_t *environment);
 /**
   * Given a line of a particular size, evaluates/executes the resulting command in the given
   * environment, returning whether the program should continue or not after this function as a
@@ -283,10 +287,11 @@ int main(int argc, char *argv[])
 	alias_table_t aliases = {0};
 
 	environment_t environment = { &path, &history, &aliases, -1 };
+	initialize_shell(&environment);
 
 	int cont = 1;
 	char *line = NULL;
-	size_t size;
+	size_t size = 0;
 
 	while (cont)
 	{
@@ -306,6 +311,32 @@ int main(int argc, char *argv[])
 	free(line);
 	clear_environment(&environment);
 	return 0;
+}
+
+void initialize_shell(environment_t *environment)
+{
+	string_t file_dir;
+	string_initialize(&file_dir);
+	string_assign_from_char_array(&file_dir, getenv("HOME"));
+	string_concatenate_char_array(&file_dir, INITIALIZE_FILE);
+	FILE *file = fopen(string_c_str(&file_dir), "r");
+	string_uninitialize(&file_dir);
+	if (file == NULL)
+	{
+		fprintf(stderr, "Error: Could not open initialization file.\n");
+		return;
+	}
+
+	char *line = NULL;
+	size_t size = 0;
+	ssize_t chars_read = getline(&line, &size, file);
+	while (chars_read > 0)
+	{
+		eval_print(line, chars_read, environment);
+		chars_read = getline(&line, &size, file);
+	}
+
+	free(line);
 }
 
 unsigned short eval_print(char *line, size_t chars_read, environment_t *environment)
