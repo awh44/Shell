@@ -20,6 +20,9 @@
 #define EXISTS_ERROR    12
 #define FORMAT_ERROR    13
 #define OPEN_ERROR      14
+#define ALREADY_OPEN    15
+#define DUP2_ERROR      16
+#define NOT_OPEN        17
 
 #define HISTORY_LENGTH 10
 #define ALIAS_BUCKETS  128
@@ -64,6 +67,7 @@ typedef struct
 	history_t *history;
 	alias_table_t *aliases;
 	int script_file;
+
 } environment_t;
 
 unsigned short eval_print(char *line, size_t size, environment_t *environment);
@@ -76,7 +80,7 @@ char **split(char *s, char delim, unsigned short retain_quotes, size_t *number);
 
 //EXECUTION FUNCTIONS
 status_t execute_builtin(environment_t *environment, command_t *command, unsigned short *is_builtin);
-status_t execute(history_t *history, command_t *command);
+status_t execute(environment_t *environment, command_t *command);
 //------------------
 
 //COMMAND FUNCTIONS
@@ -139,6 +143,10 @@ int main(int argc, char *argv[])
 	free(line);
 	clear_history(environment.history);
 	clear_aliases(environment.aliases);
+	if (environment.script_file >= 0)
+	{
+		close(environment.script_file);
+	}
 	return 0;
 }
 
@@ -161,10 +169,20 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 	error = execute_builtin(environment, &command, &is_builtin);
 	if (!is_builtin)
 	{
-		error = execute(environment->history, &command);
+		error = execute(environment, &command);
 	}
 
-	if (error == EXEC_ERROR)
+	if (error == DUP2_ERROR)
+	{
+		error_message(error);
+		free(command.arguments);
+		free(line);
+		clear_history(environment->history);
+		clear_aliases(environment->aliases);
+		close(environment->script_file);
+		exit(1);
+	}
+	else if (error == EXEC_ERROR)
 	{
 		//child process could not execute execvp, so free its memory and exit
 		error_message(error);
@@ -172,6 +190,8 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 		free(line);
 		clear_history(environment->history);
 		clear_aliases(environment->aliases);
+		//if the process made it to EXEC, it must have already closed the script_file, if it was
+		//open, so it doesn't have to be closed here
 		exit(1);
 	}
 	else if (error != SUCCESS)
@@ -319,7 +339,7 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
 				command_t *old_command = &history->commands[(history->num_commands - 1) % history->length];
 				print_command(old_command);
 				fprintf(stdout, "\n");
-				return execute(history, old_command);
+				return execute(environment, old_command);
 			}
 			else
 			{
@@ -345,7 +365,7 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
 			command_t *old_command = &history->commands[index];
 			print_command(old_command);
 			fprintf(stdout, "\n");
-			return execute(history, old_command);
+			return execute(environment, old_command);
 		}
 	}
 
@@ -384,49 +404,96 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
 			return ARGS_ERROR;
 		}
 
+		//don't allow aliases that contain slahses - these will muddle with the search of the path
+		//variable
+		if (strchr(command->arguments[1], '/') != NULL)
+		{
+			return FORMAT_ERROR;
+		}
+
 		return add_alias(environment->aliases, command->arguments[1], command->arguments[2], command->argc > 4);
 	}
 
 	alias_t *alias;
+	//if the command is an alias, then execute it now
 	if ((alias =  find_alias(environment->aliases, command->arguments[0])) != NULL)
 	{
 		*is_builtin = 1;
-		return execute(environment->history, alias->command);
+		return execute(environment, alias->command);
 	}
 
 	if (strcmp(command->arguments[0], "script") == 0)
 	{
+		*is_builtin = 1;
+		if (environment->script_file >= 0)
+		{
+			return ALREADY_OPEN;
+		}
+
 		//one for "script", one for filename, one for NULL
 		if (command->argc < 3)
 		{
 			return ARGS_ERROR;
 		}
 
-		int fd;
-		fd = open(command->arguments[1], O_WRONLY);
+		int fd = open(command->arguments[1], O_CREAT | O_WRONLY, 0600);
 		if (fd < 0)
 		{
 			return OPEN_ERROR;
 		}
 
+		fprintf(stdout, "Done opening.");
 		environment->script_file = fd;
+		return SUCCESS;
+	}
+
+	if (strcmp(command->arguments[0], "endscript") == 0)
+	{
+		*is_builtin = 1;
+		if (environment->script_file < 0)
+		{
+			return NOT_OPEN;
+		}
+
+		close(environment->script_file);
+		environment->script_file = -1;
+		return SUCCESS;
 	}
 
 	*is_builtin = 0;
 	return SUCCESS;
 }
 
-status_t execute(history_t *history, command_t *command)
+status_t execute(environment_t *environment, command_t *command)
 {
 	pid_t pid = fork();
 	if (pid < 0)
 	{
-		add_to_history(history, command);
+		add_to_history(environment->history, command);
 		return FORK_ERROR;
 	}
 	
 	if (pid == 0)
 	{
+		if (environment->script_file >= 0)
+		{
+			int result = dup2(environment->script_file, 1);
+			if (result < 0)
+			{
+				return DUP2_ERROR;
+			}
+			
+			result = dup2(environment->script_file, 2);
+			if (result < 0)
+			{
+				return DUP2_ERROR;
+			}
+
+			print_command(command);
+			fprintf(stdout, "\n");
+			close(environment->script_file);
+			environment->script_file = -1;
+		}
 		//have child execute the desired program
 		if (execvp(command->arguments[0], command->arguments) < 0)
 		{
@@ -436,7 +503,7 @@ status_t execute(history_t *history, command_t *command)
 	
 	//parent case - child process will either be replaced or will return (in the case of an error),
 	//so will never reach here
-	status_t error = add_to_history(history, command);
+	status_t error = add_to_history(environment->history, command);
 	//if it's now a background command, then don't wait for it
 	if (!command->background)
 	{
@@ -764,6 +831,15 @@ void error_message(status_t error_code)
 			break;
 		case OPEN_ERROR:
 			fprintf(stderr, "Error: Could not open file.");
+			break;
+		case ALREADY_OPEN:
+			fprintf(stderr, "Error: Script file already open.");
+			break;
+		case DUP2_ERROR:
+			fprintf(stderr, "Error: Could not map file to stdout or stderr.");
+			break;
+		case NOT_OPEN:
+			fprintf(stderr, "Error: No script file currently open.");
 			break;
 		default:
 			fprintf(stderr, "Error: Unknown error.");
