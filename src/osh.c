@@ -6,13 +6,13 @@
 #include <unistd.h>
 
 #include "misc/include/parse.h"
-#include "types/include/string_t.h"
-#include "types/include/status.h"
+#include "types/include/alias.h"
 #include "types/include/command.h"
 #include "types/include/environment.h"
-#include "types/include/path.h"
 #include "types/include/history.h"
-#include "types/include/alias.h"
+#include "types/include/path.h"
+#include "types/include/status.h"
+#include "types/include/string_t.h"
 
 #define ASCII_0 48
 #define ASCII_9 57
@@ -320,11 +320,13 @@ status_t execute_external(environment_t *environment, command_t *command)
 		FILE *verbose_out = stdout;
 		if (environment->script_file >= 0)
 		{
+			//don't write verbose output to the script file - write to actual stdout still
 			if ((verbose_out = fdopen(dup(1), "w")) == NULL)
 			{
 				return DUP_ERROR;
 			}
 
+			//copy stdout to the file
 			int result = dup2(environment->script_file, 1);
 			if (result < 0)
 			{
@@ -332,6 +334,7 @@ status_t execute_external(environment_t *environment, command_t *command)
 				return DUP2_ERROR;
 			}
 			
+			//and copy stderr too
 			result = dup2(environment->script_file, 2);
 			if (result < 0)
 			{
@@ -339,22 +342,32 @@ status_t execute_external(environment_t *environment, command_t *command)
 				return DUP2_ERROR;
 			}
 
+			//print the command to the script file
 			fprintf(stdout, "\n");
 			print_command(command);
 			fprintf(stdout, "\n");
+
+			//close the script file and set the file descriptor to -1, indicating that it has been
+			//closed
 			close(environment->script_file);
 			environment->script_file = -1;
 		}
+
 		//have child execute the desired program
-		//try the command alone by itself first, so that full paths can work
-		if (environment->verbose)
+		
+		//follow execvp rules - if the command contains a slash, try that full path by itself first
+		if (strchr(command->arguments[0], '/') != NULL)
 		{
-			fprintf(verbose_out, "Trying to execute at path %s...\n", command->arguments[0]);
+			if (environment->verbose)
+			{
+				fprintf(verbose_out, "Trying to execute at path %s\n", command->arguments[0]);
+			}
+
+			execv(command->arguments[0], command->arguments);
 		}
-		execv(command->arguments[0], command->arguments);
 
 		//if that does not work, then try appending the command to all of the directories in the
-		//path, in order
+		//path, in order, and then try to execute
 		size_t i;
 		for (i = 0; i < environment->path->num_dirs; i++)
 		{
@@ -362,7 +375,7 @@ status_t execute_external(environment_t *environment, command_t *command)
 			char *c_str = string_c_str(environment->path->dirs + i);
 			if (environment->verbose)
 			{
-				fprintf(verbose_out, "Trying to execute at path %s...\n", c_str);
+				fprintf(verbose_out, "Trying to execute at path %s\n", c_str);
 			}
 			execv(c_str, command->arguments);
 		}
@@ -371,6 +384,7 @@ status_t execute_external(environment_t *environment, command_t *command)
 		{
 			fclose(verbose_out);
 		}
+
 		return EXEC_ERROR;
 	}
 	
