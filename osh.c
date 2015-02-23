@@ -6,6 +6,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "string_t.h"
+#define HISTORY_LENGTH 10
+#define ALIAS_BUCKETS  128
+
+#define ASCII_0 48
+#define ASCII_9 57
+
 #define SUCCESS          0
 #define READ_ERROR       1
 #define LINE_EMPTY       3
@@ -23,17 +30,20 @@
 #define ALREADY_OPEN    15
 #define DUP2_ERROR      16
 #define NOT_OPEN        17
-
-#define HISTORY_LENGTH 10
-#define ALIAS_BUCKETS  128
-
-#define ASCII_0 48
-#define ASCII_9 57
+#define INVALID_VAR     18
 
 #define MIN(a, b) (a) < (b) ? (a) : (b)
 
-typedef int status_t;
+/**
+  * An error type. Returned from functions to indicate what type of error occurred; generally one of
+  * the types #define'd above
+  */
+typedef uint64_t status_t;
 
+/**
+  * A struct holding information about a command, including its command number, the arguments, the
+  * number of arguments, and whether it is to execute in the background.
+  */
 typedef struct
 {
 	size_t number;
@@ -42,6 +52,21 @@ typedef struct
 	unsigned short background;
 } command_t;
 
+/**
+  * A struct to hold an array of the path directories, along with the number of direcotires in the
+  * path
+  */
+typedef struct
+{
+	string_t *dirs;
+	size_t num_dirs;
+} path_t;
+
+/**
+  * A struct holding information about the command history, including an array of commands going a
+  * set length back in history, the total number of commands executed, and the length of the
+  * commands array
+  */
 typedef struct
 {
 	command_t commands[HISTORY_LENGTH];
@@ -49,6 +74,10 @@ typedef struct
 	size_t length;
 } history_t;
 
+/**
+  * Holds information about an alias, including the name of the alias and the command associated
+  * with that name. Also includes a next pointer for use in a linked-list/hash table
+  */
 typedef struct alias_t
 {
 	char *alias;
@@ -56,39 +85,135 @@ typedef struct alias_t
 	struct alias_t *next;
 } alias_t;
 
+/**
+  * A hash table for the aliases.
+  */
 typedef struct
 {
 	alias_t *alias_entries[ALIAS_BUCKETS];
 } alias_table_t;
 
+/**
+  * Holds all of the information about the user's current environment, including their path
+  * variable, their history, their aliases, and any open script file, with plenty room for any more
+  * to come
+  */
 typedef struct
 {
-	char **path;
+	path_t *path;
 	history_t *history;
 	alias_table_t *aliases;
 	int script_file;
 
 } environment_t;
 
+/**
+  * Given a line of a particular size, evaluates/executes the resulting command in the given
+  * environment, returning whether the program should continue or not after this function as a
+  * boolean value
+  * @param line        the line to be evaluated
+  * @param size        the size of the line
+  * @param environment the current environment in which to evaluate
+  */
 unsigned short eval_print(char *line, size_t size, environment_t *environment);
 
 //PARSING FUNCTIONS
+/**
+  * Parses the given line made up of chars_read characters, setting the values of command in doing
+  * so. Note that this function does NOT allocate new memory for each element of the command's
+  * arguments array. That is, each element of arguments points at a part of the pre-existing line.
+  * the arguments array is also NULL terminated, and argc counts the NULL pointer as an argument.
+  * @param line       the line to be parsed
+  * @param chars_read the number of characters read from the command line (i.e., the length of line)
+  * @param command    out param; arguments is NULL terminated and elements set to diff. pos. of line
+  * @return a status code indicating whether an error occurred during execution of the function
+ */
 status_t parse_line(char *line, size_t chars_read, command_t *command);
+
+/**
+  * Trims, in place, the leading and trailing white space of the line with length length
+  * @param line   the line to be trimmed
+  * @param length the length of the line
+  */
 void trim(char *line, size_t length);
+
+/**
+  * Splits the given line on the character delim, not splitting on quotes if retain_quotes is true,
+  * and returning an array of pointers INTO s. In other words, the function does not allocate new
+  * strings for the elements of the returned array, and s is destroyed upon a call to this function.
+  * @param s             the string to split; this string is not constant over this function
+  * @param delim         the character on which to split
+  * @param retain_quotes if true, if a delim is found within quotes, the func will not split on it
+  * @param number        out param; indicates hwo many elements s split into
+  * @return returns an array of elements split on delim; each element is NOT newly allocated but is
+  * simply a pointer into s
+  */
 char **split(char *s, char delim, unsigned short retain_quotes, size_t *number);
 //----------------
 
 //EXECUTION FUNCTIONS
+/**
+  * If command is a builtin command, this function will execute it, setting is_builtin appropriately
+  * @param environment the current environment in which to execute the command
+  * @param command     the command to be executed
+  * @param is_builtin  out param; is set to true if the command is actually a builtin, false if not
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t execute_builtin(environment_t *environment, command_t *command, unsigned short *is_builtin);
+/**
+  * Execute sthe command indicated by command, in the current environment
+  * @param environment the current environment in which to execute the command
+  * @param command     the command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t execute(environment_t *environment, command_t *command);
 //------------------
 
 //BUILTIN COMMAND HANDLERS
+/**
+  * Handles a history command (one executed by !! or !integer), executing if possible and returning
+  * an error otherwise
+  * @param environment the current environment in which to execute the command
+  * @param command     the history command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t history_command(environment_t *environment, command_t *command);
+
+/**
+  * Handles a cd command, returning an error code if an error occurs
+  * @param command     the cd command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t cd_command(command_t *command);
+
+/**
+  * Handles an alias command (i.e., "alias [name] "command"), executing if possible and returning an
+  * error otherwise
+  * @param environment the current environment in which to execute the alias command 
+  * @param command     the alias command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t alias_command(environment_t *environment, command_t *command);
-status_t script_command(environment_t *environment_t, command_t *command);
-status_t endscript_command(environment_t *environment_t, command_t *command);
+
+/**
+  * Handles a script command (i.e., "script [scriptname]"), starting the script if possible and
+  * returning an error otherwise. Sets the appropriate variables in environment as needed.
+  * @param environment the current environment in which to begin the script
+  * @param command     the script command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
+status_t script_command(environment_t *environment, command_t *command);
+/**
+  * Handles an endscript command, ending the script and closing the file if possible, returning an
+  * error otherwise. Sets the appropriate variables in envrionment and closes files as needed.
+  * @param environment the current environment in which to end the script
+  * @param command     the endscript command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
+status_t endscript_command(environment_t *environment, command_t *command);
+
+status_t set_command(environment_t *environment, command_t *command);
+status_t set_path_command(environment_t *environment, command_t *command);
 //-----------------------
 
 //COMMAND FUNCTIONS
@@ -123,11 +248,12 @@ size_t hash(char *str);
 
 int main(int argc, char *argv[])
 {
+	path_t path = {0};
 	history_t history = {0};
 	history.length = HISTORY_LENGTH;
 	alias_table_t aliases = {0};
 
-	environment_t environment = { NULL, &history, &aliases, -1 };
+	environment_t environment = { &path, &history, &aliases, -1 };
 
 	int cont = 1;
 	char *line = NULL;
@@ -369,35 +495,14 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
 		return endscript_command(environment, command);
 	}
 
+	if (strcmp(command->arguments[0], "set") == 0)
+	{
+		return set_command(environment, command);
+	}
+
 	//if made it to here, command is not a builtin
 	*is_builtin = 0;
 	return SUCCESS;
-}
-
-status_t alias_command(environment_t *environment, command_t *command)
-{
-	//one for "alias", one for NULL pointer
-	if (command->argc == 2)
-	{
-		//print all the aliases
-		print_aliases(environment->aliases);
-		return SUCCESS;
-	}
-	
-	//one for "alias", one for the new name, one for the command, one for the NULL pointer
-	if (command->argc < 4)
-	{
-		return ARGS_ERROR;
-	}
-
-	//don't allow aliases that contain slahses - these will muddle with the search of the path
-	//variable
-	if (strchr(command->arguments[1], '/') != NULL)
-	{
-		return FORMAT_ERROR;
-	}
-
-	return add_alias(environment->aliases, command->arguments[1], command->arguments[2], command->argc > 4);
 }
 
 status_t history_command(environment_t *environment, command_t *command)
@@ -456,6 +561,33 @@ status_t cd_command(command_t *command)
 	return SUCCESS;
 }
 
+status_t alias_command(environment_t *environment, command_t *command)
+{
+	//one for "alias", one for NULL pointer
+	if (command->argc == 2)
+	{
+		//print all the aliases
+		print_aliases(environment->aliases);
+		return SUCCESS;
+	}
+	
+	//one for "alias", one for the new name, one for the command, one for the NULL pointer
+	if (command->argc < 4)
+	{
+		return ARGS_ERROR;
+	}
+
+	//don't allow aliases that contain slahses - these will muddle with the search of the path
+	//variable
+	if (strchr(command->arguments[1], '/') != NULL)
+	{
+		return FORMAT_ERROR;
+	}
+
+	return add_alias(environment->aliases, command->arguments[1], command->arguments[2], command->argc > 4);
+}
+
+
 status_t script_command(environment_t *environment, command_t *command)
 {
 	if (environment->script_file >= 0)
@@ -488,6 +620,111 @@ status_t endscript_command(environment_t *environment, command_t *command)
 
 	close(environment->script_file);
 	environment->script_file = -1;
+	return SUCCESS;
+}
+
+status_t set_command(environment_t *environment, command_t *command)
+{
+	//one for "set", one for type, one for NULL pointer
+	if (command->argc < 3)
+	{
+		return ARGS_ERROR;
+	}
+
+	if (strcmp(command->arguments[1], "path") == 0)
+	{
+		return set_path_command(environment, command);
+	}
+
+	return INVALID_VAR;
+}
+
+status_t set_path_command(environment_t *environment, command_t *command)
+{
+	//one for "set", one for "path", one for "=", one+ for path value, one for NULL pointer
+	if (command->argc < 5)
+	{
+		return ARGS_ERROR;
+	}
+
+	//next argument after "path" must be an equals sign
+	if (strcmp(command->arguments[2], "=") != 0)
+	{
+		return FORMAT_ERROR;
+	}
+
+	//next argument must begin with a left parenthesis and must be at least two characters long
+	//additionally, cannot have command of type set path = () (i.e., no empty path)
+	size_t first_length = strlen(command->arguments[3]);
+	if (command->arguments[3][0] != '(' || command->arguments[3][1] == ')' || first_length < 2)
+	{
+		return FORMAT_ERROR;
+	}
+
+	//last argument must end with a parenthesis and must also be at least two characters long
+	size_t last_length = strlen(command->arguments[command->argc - 2]);
+	if (command->arguments[command->argc - 2][last_length - 1] != ')' || last_length < 2)
+	{
+		return FORMAT_ERROR;
+	}
+
+	//one for "set", one for "path", one for "=", one for NULL pointer
+	size_t num_dirs = command->argc - 4;
+	if (num_dirs > environment->path->num_dirs)
+	{	
+		printf("Enlarging array.\n");
+		environment->path->dirs = realloc(environment->path->dirs, num_dirs * sizeof *environment->path->dirs);
+		size_t i;
+		for (i = environment->path->num_dirs; i < num_dirs; i++)
+		{
+			string_initialize(environment->path->dirs + i);
+		}
+	}
+	else if (num_dirs < environment->path->num_dirs)
+	{
+		printf("Shrinking array.\n");
+		size_t i;
+		for (i = num_dirs; i < environment->path->num_dirs; i++)
+		{
+			string_uninitialize(environment->path->dirs + i);
+		}
+		environment->path->dirs = realloc(environment->path->dirs, num_dirs * sizeof *environment->path->dirs);
+	}
+	environment->path->num_dirs = num_dirs;
+
+	size_t current_index = 0;
+	size_t i;
+	for (i = 0; i < num_dirs; i++)
+	{
+		//adjust the argument to deal with the parentheses; do the num_dirs - 1 case first to handle
+		//the case of only one directory in the path correctly (otherwise, the ')' wouldn't be
+		//eliminated correctly)
+		char *argument = command->arguments[i + 3];
+		if (i == num_dirs - 1)
+		{
+			argument[last_length - 1] = '\0';
+		}
+
+		if (i == 0)
+		{
+			argument++;
+		}
+				
+		string_assign_from_char_array(environment->path->dirs + current_index, argument);
+
+		if (i == num_dirs - 1)
+		{
+			argument[last_length - 1] = ')';
+		}
+
+		current_index++;
+	}
+
+	for (i = 0; i < num_dirs; i++)
+	{
+		printf("%s\n", string_c_str(environment->path->dirs + i));
+	}
+
 	return SUCCESS;
 }
 
@@ -868,6 +1105,9 @@ void error_message(status_t error_code)
 			break;
 		case NOT_OPEN:
 			fprintf(stderr, "Error: No script file currently open.");
+			break;
+		case INVALID_VAR:
+			fprintf(stderr, "Error: That value cannot currently be set.");
 			break;
 		default:
 			fprintf(stderr, "Error: Unknown error.");
