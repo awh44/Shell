@@ -1,1 +1,0 @@
-/home/austin/CS/Personal/string_t/string_t.h
