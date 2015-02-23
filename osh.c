@@ -83,6 +83,14 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
 status_t execute(environment_t *environment, command_t *command);
 //------------------
 
+//BUILTIN COMMAND HANDLERS
+status_t history_command(environment_t *environment, command_t *command);
+status_t cd_command(command_t *command);
+status_t alias_command(environment_t *environment, command_t *command);
+status_t script_command(environment_t *environment_t, command_t *command);
+status_t endscript_command(environment_t *environment_t, command_t *command);
+//-----------------------
+
 //COMMAND FUNCTIONS
 status_t copy_command(command_t *destination, command_t *source);
 void print_command(command_t *command);
@@ -321,146 +329,165 @@ char **split(char *s, char delim, unsigned short retain_quotes, size_t *number)
 
 status_t execute_builtin(environment_t *environment, command_t *command, unsigned short *is_builtin)
 {
+	//assume command is a builtin
+	*is_builtin = 1;
 	if (strcmp(command->arguments[0], "history") == 0)
 	{
-		*is_builtin = 1;
 		print_history(environment->history);
 		return SUCCESS;
 	}
 
 	if (command->arguments[0][0] == '!')
 	{
-		*is_builtin = 1;
-		history_t *history = environment->history;
-		if (command->arguments[0][1] == '!')
-		{
-			if (history->num_commands >= 1)
-			{
-				command_t *old_command = &history->commands[(history->num_commands - 1) % history->length];
-				print_command(old_command);
-				fprintf(stdout, "\n");
-				return execute(environment, old_command);
-			}
-			else
-			{
-				return NO_COMMANDS;
-			}
-		}
-		else
-		{
-			size_t number;
-			status_t error = convert(command->arguments[0] + 1, &number);
-			if (error != SUCCESS)
-			{
-				return error;
-			}
-		
-			ssize_t min_number = (ssize_t) history->num_commands - (ssize_t) history->length + 1;
-			if ((number > history->num_commands) || (ssize_t) number < min_number || number == 0)
-			{
-				return NO_EXIST_ERROR;
-			}
-
-			size_t index = (number - 1) % history->length;
-			command_t *old_command = &history->commands[index];
-			print_command(old_command);
-			fprintf(stdout, "\n");
-			return execute(environment, old_command);
-		}
+		return history_command(environment, command);
 	}
 
 	if (strcmp(command->arguments[0], "cd") == 0)
 	{
-		*is_builtin = 1;
-		//one for "cd", one for the directory, one for the NULL pointer
-		if (command->argc < 3)
-		{
-			return ARGS_ERROR;
-		}
-
-		if (chdir(command->arguments[1]) < 0)
-		{
-			return CD_ERROR;
-		}
-
-		return SUCCESS;
+		return cd_command(command);
 	}
 
 	if (strcmp(command->arguments[0], "alias") == 0)
 	{
-		*is_builtin = 1;
-
-		//one for "alias", one for NULL pointer
-		if (command->argc == 2)
-		{
-			//print all the aliases
-			print_aliases(environment->aliases);
-			return SUCCESS;
-		}
-		
-		//one for "alias", one for the new name, one for the command, one for the NULL pointer
-		if (command->argc < 4)
-		{
-			return ARGS_ERROR;
-		}
-
-		//don't allow aliases that contain slahses - these will muddle with the search of the path
-		//variable
-		if (strchr(command->arguments[1], '/') != NULL)
-		{
-			return FORMAT_ERROR;
-		}
-
-		return add_alias(environment->aliases, command->arguments[1], command->arguments[2], command->argc > 4);
+		return alias_command(environment, command);
 	}
 
 	alias_t *alias;
 	//if the command is an alias, then execute it now
 	if ((alias =  find_alias(environment->aliases, command->arguments[0])) != NULL)
 	{
-		*is_builtin = 1;
 		return execute(environment, alias->command);
 	}
 
 	if (strcmp(command->arguments[0], "script") == 0)
 	{
-		*is_builtin = 1;
-		if (environment->script_file >= 0)
-		{
-			return ALREADY_OPEN;
-		}
-
-		//one for "script", one for filename, one for NULL
-		if (command->argc < 3)
-		{
-			return ARGS_ERROR;
-		}
-
-		int fd = open(command->arguments[1], O_CREAT | O_WRONLY, 0600);
-		if (fd < 0)
-		{
-			return OPEN_ERROR;
-		}
-
-		fprintf(stdout, "Done opening.");
-		environment->script_file = fd;
-		return SUCCESS;
+		return script_command(environment, command);
 	}
 
 	if (strcmp(command->arguments[0], "endscript") == 0)
 	{
-		*is_builtin = 1;
-		if (environment->script_file < 0)
-		{
-			return NOT_OPEN;
-		}
-
-		close(environment->script_file);
-		environment->script_file = -1;
-		return SUCCESS;
+		return endscript_command(environment, command);
 	}
 
+	//if made it to here, command is not a builtin
 	*is_builtin = 0;
+	return SUCCESS;
+}
+
+status_t alias_command(environment_t *environment, command_t *command)
+{
+	//one for "alias", one for NULL pointer
+	if (command->argc == 2)
+	{
+		//print all the aliases
+		print_aliases(environment->aliases);
+		return SUCCESS;
+	}
+	
+	//one for "alias", one for the new name, one for the command, one for the NULL pointer
+	if (command->argc < 4)
+	{
+		return ARGS_ERROR;
+	}
+
+	//don't allow aliases that contain slahses - these will muddle with the search of the path
+	//variable
+	if (strchr(command->arguments[1], '/') != NULL)
+	{
+		return FORMAT_ERROR;
+	}
+
+	return add_alias(environment->aliases, command->arguments[1], command->arguments[2], command->argc > 4);
+}
+
+status_t history_command(environment_t *environment, command_t *command)
+{
+	history_t *history = environment->history;
+	if (command->arguments[0][1] == '!')
+	{
+		if (history->num_commands >= 1)
+		{
+			command_t *old_command = &history->commands[(history->num_commands - 1) % history->length];
+			print_command(old_command);
+			fprintf(stdout, "\n");
+			return execute(environment, old_command);
+		}
+		else
+		{
+			return NO_COMMANDS;
+		}
+	}
+	else
+	{
+		size_t number;
+		status_t error = convert(command->arguments[0] + 1, &number);
+		if (error != SUCCESS)
+		{
+			return error;
+		}
+	
+		ssize_t min_number = (ssize_t) history->num_commands - (ssize_t) history->length + 1;
+		if ((number > history->num_commands) || (ssize_t) number < min_number || number == 0)
+		{
+			return NO_EXIST_ERROR;
+		}
+
+		size_t index = (number - 1) % history->length;
+		command_t *old_command = &history->commands[index];
+		print_command(old_command);
+		fprintf(stdout, "\n");
+		return execute(environment, old_command);
+	}
+}
+
+status_t cd_command(command_t *command)
+{
+	//one for "cd", one for the directory, one for the NULL pointer
+	if (command->argc < 3)
+	{
+		return ARGS_ERROR;
+	}
+
+	if (chdir(command->arguments[1]) < 0)
+	{
+		return CD_ERROR;
+	}
+
+	return SUCCESS;
+}
+
+status_t script_command(environment_t *environment, command_t *command)
+{
+	if (environment->script_file >= 0)
+	{
+		return ALREADY_OPEN;
+	}
+
+	//one for "script", one for filename, one for NULL
+	if (command->argc < 3)
+	{
+		return ARGS_ERROR;
+	}
+
+	int fd = open(command->arguments[1], O_CREAT | O_WRONLY, 0600);
+	if (fd < 0)
+	{
+		return OPEN_ERROR;
+	}
+
+	environment->script_file = fd;
+	return SUCCESS;
+}
+
+status_t endscript_command(environment_t *environment, command_t *command)
+{
+	if (environment->script_file < 0)
+	{
+		return NOT_OPEN;
+	}
+
+	close(environment->script_file);
+	environment->script_file = -1;
 	return SUCCESS;
 }
 
@@ -489,6 +516,7 @@ status_t execute(environment_t *environment, command_t *command)
 				return DUP2_ERROR;
 			}
 
+			fprintf(stdout, "\n");
 			print_command(command);
 			fprintf(stdout, "\n");
 			close(environment->script_file);

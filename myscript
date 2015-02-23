@@ -1,0 +1,25 @@
+
+ls -al
+total 108
+drwxrwxr-x 3 austin austin  4096 Feb 23 00:04 .
+drwxrwxr-x 3 austin austin  4096 Feb 22 21:24 ..
+-rwxrwxr-x 1 austin austin 22951 Feb 23 00:03 a.out
+drwxrwxr-x 8 austin austin  4096 Feb 22 23:49 .git
+-rw-rw-r-- 1 austin austin     6 Feb 16 15:54 .gitignore
+-rw------- 1 austin austin     8 Feb 23 00:04 myscript
+-rw-rw-r-- 1 austin austin 19691 Feb 23 00:03 osh.c
+-rw-rw-r-- 1 austin austin    79 Feb 17 19:30 README.md
+
+dir
+a.out  myscript  osh.c	README.md
+
+ls -al
+total 108
+drwxrwxr-x 3 austin austin  4096 Feb 23 00:04 .
+drwxrwxr-x 3 austin austin  4096 Feb 22 21:24 ..
+-rwxrwxr-x 1 austin austin 22951 Feb 23 00:03 a.out
+drwxrwxr-x 8 austin austin  4096 Feb 22 23:49 .git
+-rw-rw-r-- 1 austin austin     6 Feb 16 15:54 .gitignore
+-rw------- 1 austin austin   484 Feb 23 00:04 myscript
+-rw-rw-r-- 1 austin austin 19691 Feb 23 00:03 osh.c
+-rw-rw-r-- 1 austin austin    79 Feb 17 19:30 README.md
