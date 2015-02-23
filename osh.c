@@ -177,7 +177,7 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
   * @param command     the command to be executed
   * @return a status code indicating whether an error occurred during execution of the function
   */
-status_t execute(environment_t *environment, command_t *command);
+status_t execute_external(environment_t *environment, command_t *command);
 //------------------
 
 //BUILTIN COMMAND HANDLERS
@@ -388,7 +388,7 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 	error = execute_builtin(environment, &command, &is_builtin);
 	if (!is_builtin)
 	{
-		error = execute(environment, &command);
+		error = execute_external(environment, &command);
 	}
 
 	if (error == EXEC_ERROR || error == DUP2_ERROR)
@@ -589,7 +589,7 @@ status_t history_command(environment_t *environment, command_t *command)
 			command_t *old_command = &history->commands[(history->num_commands - 1) % history->length];
 			print_command(old_command);
 			fprintf(stdout, "\n");
-			return execute(environment, old_command);
+			return execute_external(environment, old_command);
 		}
 		else
 		{
@@ -615,7 +615,7 @@ status_t history_command(environment_t *environment, command_t *command)
 		command_t *old_command = &history->commands[index];
 		print_command(old_command);
 		fprintf(stdout, "\n");
-		return execute(environment, old_command);
+		return execute_external(environment, old_command);
 	}
 }
 
@@ -666,7 +666,7 @@ status_t alias_execute_command(environment_t *environment, command_t *original, 
 	//one for alias command and one for NULL pointer
 	if (original->argc == 2 && !original->background)
 	{
-		return execute(environment, alias);
+		return execute_external(environment, alias);
 	}
 
 	command_t expanded;
@@ -686,7 +686,7 @@ status_t alias_execute_command(environment_t *environment, command_t *original, 
 		expanded.background = 1;
 	}
 	
-	status_t error = execute(environment, &expanded);
+	status_t error = execute_external(environment, &expanded);
 	free(expanded.arguments);
 	
 	return error;
@@ -810,7 +810,7 @@ status_t set_verbose_command(environment_t *environment, command_t *command)
 	return FORMAT_ERROR;
 }
 
-status_t execute(environment_t *environment, command_t *command)
+status_t execute_external(environment_t *environment, command_t *command)
 {
 	pid_t pid = fork();
 	if (pid < 0)
