@@ -143,17 +143,21 @@ status_t convert(char *s, size_t *value);
 
 int main(void)
 {
+	//initialize the envrionment on the stack, in main
 	path_t path = {0};
 	history_t history = {0};
 	history.length = HISTORY_LENGTH;
 	alias_table_t aliases = {0};
 	environment_t environment = { &path, &history, &aliases, -1, 0 };
+	
+	//open the user's initialization function to further set up the shell
 	initialize_shell(&environment);
 
 	int cont = 1;
 	char *line = NULL;
 	size_t size = 0;
 
+	//enter REPL loop
 	while (cont)
 	{
 		fprintf(stdout, "osh> ");
@@ -171,8 +175,10 @@ int main(void)
 		}
 	}
 
+	//cleanup
 	free(line);
 	clear_environment(&environment);
+	
 	return 0;
 }
 
@@ -192,6 +198,7 @@ void initialize_shell(environment_t *environment)
 
 	char *line = NULL;
 	size_t size = 0;
+	//enter "REPL" loop
 	ssize_t chars_read = getline(&line, &size, file);
 	while (chars_read > 0)
 	{
@@ -205,11 +212,13 @@ void initialize_shell(environment_t *environment)
 
 unsigned short eval_print(char *line, size_t chars_read, environment_t *environment)
 {
+	//user wants to exit, return that indication to caller
 	if (strcmp(line, "exit\n") == 0)
 	{
 		return 0;
 	} 
 
+	//parse the input and place the result in the given command
 	command_t command = {0};
 	status_t error = parse_line(line, chars_read, &command);
 	if (error != SUCCESS)
@@ -224,6 +233,8 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 		fprintf(stdout, "\n");
 	}
 
+
+	//if command is a builtin, let execute_builtin handle it, otherwise execute the external command
 	unsigned short is_builtin;
 	error = execute_builtin(environment, &command, &is_builtin);
 	if (!is_builtin)
@@ -242,27 +253,25 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 	}
 	else if (error != SUCCESS)
 	{
+		//some other error occurred (in the parent)
 		error_message(error);
+		free_linked_list(command.pipe);
 		free(command.arguments);
 		return 1;
 	}
 
 
 	//Only made it here if no errors occurred, so safe to free command.arguments
-	command_t *pipe, *next;
-	for (pipe = command.pipe; pipe != NULL; pipe = next)
-	{
-		next = pipe->pipe;
-		free(pipe);
-	}
+	free_linked_list(command.pipe);
 	free(command.arguments);
 	return 1;
 }
 
 status_t execute_builtin(environment_t *environment, command_t *command, unsigned short *is_builtin)
 {
-	//assume command is a builtin
+	//assume command is a builtin; if function makes it to end, then reset it
 	*is_builtin = 1;
+
 	if (strcmp(command->arguments[0], "history") == 0)
 	{
 		print_history(environment->history);

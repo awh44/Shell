@@ -39,4 +39,10 @@ void print_command(command_t *command);
   */
 void free_command(command_t *command);
 
+/**
+  * Frees the linked list of commands along pipe, and ONLY the commands, starting with command
+  * @param command the head of the linked list with which to begin the freeing
+  */
+void free_linked_list(command_t *command);
+
 #endif

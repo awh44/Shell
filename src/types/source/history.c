@@ -19,6 +19,7 @@ status_t add_to_history(history_t *history, command_t *command)
 	}
 	history->commands[index].number = history->num_commands;
 
+	//if over the bounds of the array, then free the old command at index
 	if (history->num_commands > history->length)
 	{
 		free_command(&old_command);
@@ -29,6 +30,8 @@ status_t add_to_history(history_t *history, command_t *command)
 
 void print_history(history_t *history)
 {
+	//if less than the maximum length, then only go the number of commands (i.e., stop at 4 if there
+	//are only 4 commands in the history; otherwise, go all the way up to the history length
 	size_t num_to_do = MIN(history->num_commands, history->length);
 	ssize_t start_index = history->num_commands % history->length;
 	size_t i;
@@ -44,6 +47,7 @@ void print_history(history_t *history)
 
 void clear_history(history_t *history)
 {
+	//see the comment above in print_history about choosing the minimun
 	size_t min = MIN(history->num_commands, history->length);
 	size_t i;
 	for (i = 0; i < min; i++)

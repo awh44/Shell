@@ -36,7 +36,11 @@ ssize_t find_str(char **arr, size_t length, char *str);
 /**
   * Given an initially set up command, if that command has pipes, splits the command up and makes
   * command the head of a linked list of piped commands, maintained by the pipe pointers in the
-  * struct
+  * struct. Note that this function is similar to split. After executing it, the linked list of
+  * commands' argument pointers will ALL be pointing at command's original array. So in other words,
+  * after a call to this function, free(command->pipe->arguments) should NEVER be called, and
+  * free_command should NEVER be called on the command passed to this function or any of the linked
+  * list elements. However, the elements of the linked list do still need to be freed.
   * @param command the command to split up and make the head of the linked list
   * @return a status code indicating whether an error occurred during execution of the function
   */
@@ -179,8 +183,10 @@ ssize_t find_str(char **arr, size_t length, char *str)
 
 status_t setup_pipes(command_t *command)
 {
-	//find pipe. do the -1 to prevent find_str from looking at the NULL pointer
+	//find pipe. do the - 1 to prevent find_str from looking at the NULL pointer
 	ssize_t pipe_pos = find_str(command->arguments, command->argc - 1, "|");
+
+	//if there is a pipe at the first index (0, that is), the command is formatted incorrectly
 	if (pipe_pos == 0)
 	{
 		return FORMAT_ERROR;
@@ -188,17 +194,18 @@ status_t setup_pipes(command_t *command)
 
 	if (pipe_pos > 0)
 	{
+		//start updating the original command
 		size_t orig_argc = command->argc;
 		command->argc = pipe_pos + 1;
 		command->arguments[pipe_pos] = NULL;
 
+		//set up the new command, which is going to be the pipe of command
 		command_t *pipe_command = malloc(sizeof *pipe_command);
 		if (pipe_command == NULL)
 		{
 			free(pipe_command);
 			return MEMORY_ERROR;
 		}
-
 		pipe_command->arguments = command->arguments + pipe_pos + 1;
 		pipe_command->argc = orig_argc - command->argc;
 		pipe_command->background = command->background;

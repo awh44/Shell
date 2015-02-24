@@ -60,6 +60,7 @@ status_t add_alias(alias_table_t *table, char *name, char *command, unsigned sho
 
 	error = copy_command(command_copy, &new_command);
 	free(new_command.arguments);
+	free_linked_list(new_command.pipe);
 	if (error != SUCCESS)
 	{
 		free_command(command_copy);

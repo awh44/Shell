@@ -110,3 +110,13 @@ void free_command(command_t *command)
 		free(command->pipe);
 	}
 }
+
+void free_linked_list(command_t *command)
+{
+	while (command != NULL)
+	{
+		command_t *next = command->pipe;
+		free(command);
+		command = next;
+	}
+}
