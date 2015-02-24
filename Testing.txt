@@ -1,0 +1,96 @@
+Run commands:
+	Test case 1: /bin/ls
+	Test case 2: /bin/echo hello
+	Test case 3: /bin/cat README.md
+	Test case 4: sdfsdfsdfsdf
+		#Error case
+
+Run commands in background:
+	Test case 1: /bin/ls &
+	Test case 2: /bin/echo hello &
+	Test case 3: /bin/cat README.md &
+	Test case 4: sdfsdfsdfsdf &
+		#Error case
+Note that the prompt appears BEFORE the output usually, so the background portion is working
+
+History:
+	Test case 1: multi-step
+		/bin/ls -l
+		!!
+		!1
+		history
+	Test case 2: multi-step
+		/bin/ls -a
+		/bin/ls -al
+		!!
+		!!
+		!!
+		!!
+		!!
+		!!
+		!!
+		/bin/cat README.md
+		history
+		!1
+		!2
+		!2                                        #Error case
+	Test case 3: !1
+		#Error case
+	Test case 4: !3232
+		#Error case
+
+Functionality 1: (alias)
+	Test case 1: multi-step
+		alias dircommand "ls -al"
+		dircommand -C
+	Test case 2: multi-step
+		alias filecount "ls -l | wc -l"
+		alias                                     #List aliases
+		alias filecount "ls | wc -l"              #Error - exists
+		alias filecount "ls | wc -l" yes          #Overwrite
+	Test case 3: alias thing/other "ls -l"
+		#Error case - aliases cannot contain /'s
+	Test case 4: alias thing ls
+		#Error case - alias commands must be surrounded by quotes
+
+Functionality 2: (scripting)
+	Test case: multi-step
+		set verbose                              #Test if diagnostics go into script
+		endscript                                #Error
+		script mylog.txt
+		script thatlog.txt                       #Error
+		ls -l
+		cat README.md
+		ls -l | wc -l                            #Make sure pipe commands still end up in script
+		endscript
+
+Functionality 3: (path)
+	Test case 1: multi-step
+		set path = (. /bin /usr/bin/)
+		osh
+		exit
+		exit
+	Test case 2: multi-step
+		set path = (/bin)
+		ls
+	Test case 3: set path (.)
+		#Error case - no equal sign
+	Test case 4: set path = ( . )
+		#Error case - spaces around parentheses
+
+Functionality 4: (.rc file)
+	Test case 1: use .cs543rc, then try ls, cat, etc.
+	Test case 2: use .cs543rc, then try dirthingy, dirthingy -C, etc.
+
+Functionality 5: (verbose)
+	Test case 1: multi-step
+		set verbose on
+		set path = (. /usr/bin /bin)
+		ls
+		set verbose off
+		set path = (. /usr/bin /bin)
+		ls
+
+Functionatliy 6: (pipes)
+	Test case 1: /bin/ls | /usr/bin/wc -l
+	Test case 2: /bin/echo Hello, how are you? | /bin/cat | /usr/bin/wc -w
