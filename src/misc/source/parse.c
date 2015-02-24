@@ -33,19 +33,6 @@ char **split(char *s, char delim, unsigned short retain_quotes, size_t *number);
   */
 ssize_t find_str(char **arr, size_t length, char *str);
 
-/**
-  * Given an initially set up command, if that command has pipes, splits the command up and makes
-  * command the head of a linked list of piped commands, maintained by the pipe pointers in the
-  * struct. Note that this function is similar to split. After executing it, the linked list of
-  * commands' argument pointers will ALL be pointing at command's original array. So in other words,
-  * after a call to this function, free(command->pipe->arguments) should NEVER be called, and
-  * free_command should NEVER be called on the command passed to this function or any of the linked
-  * list elements. However, the elements of the linked list do still need to be freed.
-  * @param command the command to split up and make the head of the linked list
-  * @return a status code indicating whether an error occurred during execution of the function
-  */
-status_t setup_pipes(command_t *command);
-
 status_t parse_line(char *line, size_t chars_read, command_t *command)
 {
 	//handle case of empty line

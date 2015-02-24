@@ -13,21 +13,23 @@
 #define LINE_EMPTY       3
 #define MEMORY_ERROR     4
 #define FORK_ERROR       5
-#define EXEC_ERROR       6
-#define NO_COMMANDS      7
-#define NO_EXIST_ERROR   8
-#define NUMBER_ERROR     9
-#define ARGS_ERROR      10
-#define CD_ERROR        11
-#define EXISTS_ERROR    12
-#define FORMAT_ERROR    13
-#define OPEN_ERROR      14
-#define ALREADY_OPEN    15
-#define DUP_ERROR       16
-#define DUP2_ERROR      17
-#define NOT_OPEN        18
-#define INVALID_VAR     19
-#define DIR_ERROR       20 
+#define CHILD_FORK_ERR   6
+#define EXEC_ERROR       7
+#define NO_COMMANDS      8
+#define NO_EXIST_ERROR   9
+#define NUMBER_ERROR    10
+#define ARGS_ERROR      11
+#define CD_ERROR        12
+#define EXISTS_ERROR    13
+#define FORMAT_ERROR    14
+#define OPEN_ERROR      15
+#define ALREADY_OPEN    16
+#define DUP_ERROR       17
+#define DUP2_ERROR      18
+#define NOT_OPEN        19
+#define INVALID_VAR     20
+#define DIR_ERROR       21 
+#define PIPE_ERROR      22
 
 /**
   * An error type. Returned from functions to indicate what type of error occurred; generally one of

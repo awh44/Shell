@@ -15,6 +15,7 @@ void error_message(status_t error_code)
 			fprintf(stderr, "Error: Could not allocate memory.");
 			break;
 		case FORK_ERROR:
+		case CHILD_FORK_ERR:
 			fprintf(stderr, "Error: Could not fork.");
 			break;
 		case EXEC_ERROR:
@@ -61,6 +62,9 @@ void error_message(status_t error_code)
 			break;
 		case DIR_ERROR:
 			fprintf(stderr, "Error: Could not add directory to path: ");
+			break;
+		case PIPE_ERROR:
+			fprintf(stderr, "Error: Could not create pipe.");
 			break;
 		default:
 			fprintf(stderr, "Error: Unknown error.");

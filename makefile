@@ -6,13 +6,13 @@ OBJ_COMP=$(CC) $(OBJOPS) $<
 .PHONY: run
 
 run: osh
-	./osh
+	@./osh
 
 osh: build/osh.o build/parse.o build/alias.o build/command.o build/environment.o build/history.o build/path.o build/status.o build/string_t.o
 	$(CC) $(OPS) build/osh.o build/parse.o build/alias.o build/command.o build/environment.o build/history.o build/path.o build/status.o build/string_t.o
 
 build/osh.o: src/osh.c
-	$(OBJ_COMP)
+	$(CC) $(OBJOPS) -Wno-missing-field-initializers $<
 
 build/parse.o: src/misc/source/parse.c src/misc/include/parse.h
 	$(OBJ_COMP)

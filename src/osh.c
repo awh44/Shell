@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,14 @@ status_t execute_builtin(environment_t *environment, command_t *command, unsigne
   * @return a status code indicating whether an error occurred during execution of the function
   */
 status_t execute_external(environment_t *environment, command_t *command);
+
+/**
+  * Perform the actual execution by the child process of the command
+  * @param environment the current environment in which to execute the command
+  * @param command     the command to be executed
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
+status_t child_execute(environment_t *environment, command_t *command);
 
 /**
   * Handles a history command (one executed by !! or !integer), executing if possible and returning
@@ -233,7 +242,6 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 		fprintf(stdout, "\n");
 	}
 
-
 	//if command is a builtin, let execute_builtin handle it, otherwise execute the external command
 	unsigned short is_builtin;
 	error = execute_builtin(environment, &command, &is_builtin);
@@ -242,7 +250,7 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 		error = execute_external(environment, &command);
 	}
 
-	if (error == EXEC_ERROR || error == DUP2_ERROR)
+	if (error == EXEC_ERROR || error == DUP_ERROR || error == DUP2_ERROR || error == PIPE_ERROR || error == CHILD_FORK_ERR)
 	{
 		//child process could not execute execv, so free its memory and exit
 		error_message(error);
@@ -331,75 +339,7 @@ status_t execute_external(environment_t *environment, command_t *command)
 	
 	if (pid == 0)
 	{
-		FILE *verbose_out = stdout;
-		if (environment->script_file >= 0)
-		{
-			//don't write verbose output to the script file - write to actual stdout still
-			if ((verbose_out = fdopen(dup(1), "w")) == NULL)
-			{
-				return DUP_ERROR;
-			}
-
-			//copy stdout to the file
-			int result = dup2(environment->script_file, 1);
-			if (result < 0)
-			{
-				fclose(verbose_out);
-				return DUP2_ERROR;
-			}
-			
-			//and copy stderr too
-			result = dup2(environment->script_file, 2);
-			if (result < 0)
-			{
-				fclose(verbose_out);
-				return DUP2_ERROR;
-			}
-
-			//print the command to the script file
-			fprintf(stdout, "\n");
-			print_command(command);
-			fprintf(stdout, "\n");
-
-			//close the script file and set the file descriptor to -1, indicating that it has been
-			//closed
-			close(environment->script_file);
-			environment->script_file = -1;
-		}
-
-		//have child execute the desired program
-		
-		//follow execvp rules - if the command contains a slash, try that full path by itself first
-		if (strchr(command->arguments[0], '/') != NULL)
-		{
-			if (environment->verbose)
-			{
-				fprintf(verbose_out, "Trying to execute at path %s\n", command->arguments[0]);
-			}
-
-			execv(command->arguments[0], command->arguments);
-		}
-
-		//if that does not work, then try appending the command to all of the directories in the
-		//path, in order, and then try to execute
-		size_t i;
-		for (i = 0; i < environment->path->num_dirs; i++)
-		{
-			string_concatenate_char_array(environment->path->dirs + i, command->arguments[0]);
-			char *c_str = string_c_str(environment->path->dirs + i);
-			if (environment->verbose)
-			{
-				fprintf(verbose_out, "Trying to execute at path %s\n", c_str);
-			}
-			execv(c_str, command->arguments);
-		}
-
-		if (verbose_out != stdout)
-		{
-			fclose(verbose_out);
-		}
-
-		return EXEC_ERROR;
+		return child_execute(environment, command);
 	}
 	
 	//parent case - child process will either be replaced or will return (in the case of an error),
@@ -413,6 +353,103 @@ status_t execute_external(environment_t *environment, command_t *command)
 	}
 
 	return error;
+}
+
+status_t child_execute(environment_t *environment, command_t *command)
+{
+	FILE *verbose_out = stdout;
+	if (command->pipe != NULL)
+	{
+		int pipefd[2];
+		if (pipe(pipefd) < 0)
+		{
+			return PIPE_ERROR;
+		}
+
+		pid_t child_fork_pid = fork();
+		if (child_fork_pid < 0)
+		{
+			close(pipefd[0]);
+			close(pipefd[1]);
+			return CHILD_FORK_ERR;
+		}
+
+		if (child_fork_pid == 0)
+		{
+			dup2(pipefd[0], STDIN_FILENO);
+			close(pipefd[1]);
+			return child_execute(environment, command->pipe);
+		}
+
+		dup2(pipefd[1], STDOUT_FILENO);
+	}
+	else if (environment->script_file >= 0)
+	{
+		//don't write verbose output to the script file - write to actual stdout still
+		if ((verbose_out = fdopen(dup(STDOUT_FILENO), "w")) == NULL)
+		{
+			return DUP_ERROR;
+		}
+
+		//copy stdout to the file
+		int result = dup2(environment->script_file, STDOUT_FILENO);
+		if (result < 0)
+		{
+			fclose(verbose_out);
+			return DUP2_ERROR;
+		}
+		
+		//and copy stderr too
+		result = dup2(environment->script_file, STDERR_FILENO);
+		if (result < 0)
+		{
+			fclose(verbose_out);
+			return DUP2_ERROR;
+		}
+
+		//print the command to the script file
+		fprintf(stdout, "\n");
+		print_command(command);
+		fprintf(stdout, "\n");
+
+		//close the script file and set the file descriptor to -1, indicating that it has been
+		//closed
+		close(environment->script_file);
+		environment->script_file = -1;
+	}
+
+	//have child execute the desired program
+	//follow execvp rules - if the command contains a slash, try that full path by itself first
+	if (strchr(command->arguments[0], '/') != NULL)
+	{
+		if (environment->verbose)
+		{
+			fprintf(verbose_out, "Trying to execute at path %s\n", command->arguments[0]);
+		}
+
+		execv(command->arguments[0], command->arguments);
+	}
+
+	//if that does not work, then try appending the command to all of the directories in the
+	//path, in order, and then try to execute
+	size_t i;
+	for (i = 0; i < environment->path->num_dirs; i++)
+	{
+		string_concatenate_char_array(environment->path->dirs + i, command->arguments[0]);
+		char *c_str = string_c_str(environment->path->dirs + i);
+		if (environment->verbose)
+		{
+			fprintf(verbose_out, "Trying to execute at path %s\n", c_str);
+		}
+		execv(c_str, command->arguments);
+	}
+
+	if (verbose_out != stdout)
+	{
+		fclose(verbose_out);
+	}
+
+	return EXEC_ERROR;
 }
 
 status_t history_command(environment_t *environment, command_t *command)
@@ -507,23 +544,30 @@ status_t alias_execute_command(environment_t *environment, command_t *original, 
 
 	command_t expanded;
 	expanded = *alias;
-	size_t new_argc = original->argc - 2 + alias->argc;
-	expanded.arguments = malloc(new_argc * sizeof *expanded.arguments);
+	expanded.argc = original->argc - 2 + alias->argc;
+	expanded.arguments = malloc(expanded.argc * sizeof *expanded.arguments);
 	memcpy(expanded.arguments, alias->arguments, alias->argc * sizeof *alias->arguments);
 	size_t new_index, old_index = 1;
-	for (new_index = alias->argc - 1; new_index < new_argc; new_index++)
+	for (new_index = alias->argc - 1; new_index < expanded.argc; new_index++)
 	{
 		expanded.arguments[new_index] = original->arguments[old_index];
 		old_index++;
 	}
-	
+
 	if (original->background)
 	{
 		expanded.background = 1;
 	}
-	
-	status_t error = execute_external(environment, &expanded);
+
+	status_t error;/* = setup_pipes(&expanded);
+	if (error != SUCCESS)
+	{
+		return error;
+	}*/
+
+	error = execute_external(environment, &expanded);
 	free(expanded.arguments);
+	//free_linked_list(expanded.pipe);
 	
 	return error;
 }
