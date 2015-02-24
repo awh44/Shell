@@ -23,8 +23,23 @@ void trim(char *line, size_t length);
   */
 char **split(char *s, char delim, unsigned short retain_quotes, size_t *number);
 
+/**
+  * Finds the given string str in the array arr with lenght length, returning the index if found and
+  * -1 otherwise
+  * @param arr    the array of strings to search
+  * @param length the length of the array
+  * @param str    the string to find in arr
+  * @return the index of str in arr, if found, and -1 otherwise
+  */
 ssize_t find_str(char **arr, size_t length, char *str);
 
+/**
+  * Given an initially set up command, if that command has pipes, splits the command up and makes
+  * command the head of a linked list of piped commands, maintained by the pipe pointers in the
+  * struct
+  * @param command the command to split up and make the head of the linked list
+  * @return a status code indicating whether an error occurred during execution of the function
+  */
 status_t setup_pipes(command_t *command);
 
 status_t parse_line(char *line, size_t chars_read, command_t *command)
@@ -166,6 +181,11 @@ status_t setup_pipes(command_t *command)
 {
 	//find pipe. do the -1 to prevent find_str from looking at the NULL pointer
 	ssize_t pipe_pos = find_str(command->arguments, command->argc - 1, "|");
+	if (pipe_pos == 0)
+	{
+		return FORMAT_ERROR;
+	}
+
 	if (pipe_pos > 0)
 	{
 		size_t orig_argc = command->argc;
