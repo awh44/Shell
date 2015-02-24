@@ -4,6 +4,8 @@
 
 #include "../include/command.h"
 
+void print_single_command(command_t *command);
+
 status_t copy_command(command_t *destination, command_t *source)
 {
     destination->number = source->number;
@@ -20,7 +22,7 @@ status_t copy_command(command_t *destination, command_t *source)
         if (new_array[i] == NULL)
         {
             size_t j;
-            for (j = i - 1; j != 0; j--)
+            for (j = 0; j < i; j++)
             {
                 free(new_array[j]);
             }
@@ -29,6 +31,30 @@ status_t copy_command(command_t *destination, command_t *source)
         }
     }
     new_array[i] = NULL;
+	
+	command_t *pipe = source->pipe;
+	if (pipe != NULL)
+	{
+		command_t *pipe_copy = malloc(sizeof *pipe_copy);
+		status_t error = copy_command(pipe_copy, pipe);
+		if (error != SUCCESS)
+		{
+			size_t j;
+			for (j = 0; j < i; j++)
+			{
+				free(new_array[j]);
+			}
+			free(new_array);
+			free(pipe_copy);
+			return error;
+		}
+
+		destination->pipe = pipe_copy;
+	}
+	else
+	{
+		destination->pipe = NULL;
+	}
 
     destination->arguments = new_array;
     destination->argc = source->argc;
@@ -38,6 +64,18 @@ status_t copy_command(command_t *destination, command_t *source)
 }
 
 void print_command(command_t *command)
+{
+	print_single_command(command);
+	command_t *curr_command = command->pipe;
+	while (curr_command != NULL)
+	{
+		fprintf(stdout, " | ");
+		print_single_command(curr_command);
+		curr_command = curr_command->pipe;
+	}
+}
+
+void print_single_command(command_t *command)
 {
     if (command->argc < 1)
     {
@@ -65,4 +103,10 @@ void free_command(command_t *command)
         free(command->arguments[i]);
     }
     free(command->arguments);
+
+	if (command->pipe != NULL)
+	{
+		free_command(command->pipe);
+		free(command->pipe);
+	}
 }

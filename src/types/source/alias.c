@@ -62,6 +62,7 @@ status_t add_alias(alias_table_t *table, char *name, char *command, unsigned sho
 	free(new_command.arguments);
 	if (error != SUCCESS)
 	{
+		free_command(command_copy);
 		free(command_copy);
 		return error;
 	}
@@ -69,6 +70,7 @@ status_t add_alias(alias_table_t *table, char *name, char *command, unsigned sho
 	alias_t *new_alias = malloc(sizeof *new_alias);
 	if (new_alias == NULL)
 	{
+		free_command(command_copy);
 		free(command_copy);
 		return MEMORY_ERROR;
 	}
@@ -76,6 +78,7 @@ status_t add_alias(alias_table_t *table, char *name, char *command, unsigned sho
 	new_alias->alias = strdup(name);
 	if (new_alias->alias == NULL)
 	{
+		free_command(command_copy);
 		free(command_copy);
 		free(new_alias);
 		return MEMORY_ERROR;

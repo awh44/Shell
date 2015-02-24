@@ -23,6 +23,10 @@ void trim(char *line, size_t length);
   */
 char **split(char *s, char delim, unsigned short retain_quotes, size_t *number);
 
+ssize_t find_str(char **arr, size_t length, char *str);
+
+status_t setup_pipes(command_t *command);
+
 status_t parse_line(char *line, size_t chars_read, command_t *command)
 {
 	//handle case of empty line
@@ -58,11 +62,19 @@ status_t parse_line(char *line, size_t chars_read, command_t *command)
 		char **tmp = realloc(command->arguments, command->argc * sizeof *tmp);
 		if (tmp == NULL)
 		{
+			free(command->arguments);
 			return MEMORY_ERROR;
 		}
 		
 		command->arguments = tmp;
 		command->arguments[command->argc - 1] = NULL;
+	}
+
+	status_t error = setup_pipes(command);
+	if (error != SUCCESS)
+	{
+		free(command->arguments);
+		return error;
 	}
 
 	return SUCCESS;
@@ -134,4 +146,54 @@ char **split(char *s, char delim, unsigned short retain_quotes, size_t *number)
     }
     
 	return ret_val;
+}
+
+ssize_t find_str(char **arr, size_t length, char *str)
+{
+	ssize_t i;
+	for (i = 0; i < length; i++)
+	{
+		if (strcmp(arr[i], str) == 0)
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+status_t setup_pipes(command_t *command)
+{
+	//find pipe. do the -1 to prevent find_str from looking at the NULL pointer
+	ssize_t pipe_pos = find_str(command->arguments, command->argc - 1, "|");
+	if (pipe_pos > 0)
+	{
+		size_t orig_argc = command->argc;
+		command->argc = pipe_pos + 1;
+		command->arguments[pipe_pos] = NULL;
+
+		command_t *pipe_command = malloc(sizeof *pipe_command);
+		if (pipe_command == NULL)
+		{
+			free(pipe_command);
+			return MEMORY_ERROR;
+		}
+
+		pipe_command->arguments = command->arguments + pipe_pos + 1;
+		pipe_command->argc = orig_argc - command->argc;
+		pipe_command->background = command->background;
+		status_t error = setup_pipes(pipe_command);
+		if (error != SUCCESS)
+		{
+			free(pipe_command);
+			return error;
+		}
+
+		command->pipe = pipe_command;
+		return SUCCESS;
+	}
+	
+	//base case - no more pipes
+	command->pipe = NULL;
+	return SUCCESS;
 }

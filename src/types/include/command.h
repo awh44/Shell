@@ -9,12 +9,13 @@
   * A struct holding information about a command, including its command number, the arguments, the
   * number of arguments, and whether it is to execute in the background.
   */
-typedef struct
+typedef struct command_t
 {
-    size_t number;
-    char **arguments;
-    size_t argc;
-    unsigned short background;
+	size_t number;
+	char **arguments;
+	size_t argc;
+	unsigned short background;
+	struct command_t *pipe;
 } command_t;
 
 /**

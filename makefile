@@ -41,3 +41,6 @@ build/string_t.o: src/types/source/string_t.c src/types/include/string_t.h src/t
 clean:
 	rm -rf build/*
 	rm osh
+
+search:
+	grep '$(P)' src/osh.c src/*/*/*

@@ -238,18 +238,23 @@ unsigned short eval_print(char *line, size_t chars_read, environment_t *environm
 		free(command.arguments);
 		free(line);
 		clear_environment(environment);
-		//if the process made it to EXEC, it must have already closed the script_file, if it was
-		//open, so it doesn't have to be closed here
 		exit(1);
 	}
 	else if (error != SUCCESS)
 	{
 		error_message(error);
+		free(command.arguments);
+		return 1;
 	}
 
 
-	//arguments must either be NULL or must not have been freed by one of the subsequently
-	//called functions, so safe to just free it here.	
+	//Only made it here if no errors occurred, so safe to free command.arguments
+	command_t *pipe, *next;
+	for (pipe = command.pipe; pipe != NULL; pipe = next)
+	{
+		next = pipe->pipe;
+		free(pipe);
+	}
 	free(command.arguments);
 	return 1;
 }
