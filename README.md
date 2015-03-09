@@ -1,6 +1,7 @@
 # Shell
 An implemenation of a basic Unix shell for an operating systems course. The following functionality
-has been implemented and can be found in the given files.
+has been implemented and can be found in the given files. To compile the shell, type "make osh".
+To run the shell, type "make" or "make run". To quit the shell, type "exit" at the prompt.
 
 #Directory Structure
 First, just a quick note about directory structure. There are several types that were defined for
@@ -69,7 +70,7 @@ src/types/source/command.c, setting up a linked list of piped commands. Finally,
 in src/osh.c, the commands are actually set up to pipe into one another. Note that there is
 something strange with the way the parent process waits for pipe commands to finish. That is, the
 initial shell process waits for its child to finish, but it does not wait for any further children
-to finish.
+to finish. As noted in the alias section, pipes do not currently work with aliases.
 
 #Change Directory
 This is handled by the cd\_command function in src/osh.c

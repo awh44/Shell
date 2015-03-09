@@ -17,6 +17,7 @@ typedef struct
 	alias_table_t *aliases;
 	int script_file;
 	unsigned short verbose;
+	string_t *prompt;
 } environment_t;
 
 /**

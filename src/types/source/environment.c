@@ -12,4 +12,5 @@ void clear_environment(environment_t *environment)
 		close(environment->script_file);
 	}
 	environment->script_file = -1;
+	string_uninitialize(environment->prompt);
 }

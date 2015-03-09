@@ -1,3 +1,6 @@
+Note that a test rc file is included in this directory (.cs543rc).
+Also note that a test log (mylog.txt) is also included, following the test case for functionality 4
+
 Run commands:
 	Test case 1: /bin/ls
 	Test case 2: /bin/echo hello

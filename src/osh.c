@@ -141,6 +141,8 @@ status_t set_path_command(environment_t *environment, command_t *command);
   */
 status_t set_verbose_command(environment_t *environment, command_t *command);
 
+status_t set_prompt_command(environment_t *environment, command_t *command);
+
 /**
   * Converts a string pointed to by s to a size_t, setting *value on success and returning an error
   * otherwise
@@ -157,7 +159,10 @@ int main(void)
 	history_t history = {0};
 	history.length = HISTORY_LENGTH;
 	alias_table_t aliases = {0};
-	environment_t environment = { &path, &history, &aliases, -1, 0 };
+	string_t prompt;
+	string_initialize(&prompt);
+	string_assign_from_char_array(&prompt, "osh> ");
+	environment_t environment = { &path, &history, &aliases, -1, 0, &prompt };
 	
 	//open the user's initialization function to further set up the shell
 	initialize_shell(&environment);
@@ -169,14 +174,13 @@ int main(void)
 	//enter REPL loop
 	while (cont)
 	{
-		fprintf(stdout, "osh> ");
+		fprintf(stdout, "%s", string_c_str(environment.prompt));
 		fflush(stdout);
 		ssize_t chars_read = getline(&line, &size, stdin);
 		if (chars_read < 0)
 		{
 			cont = 0;
 			fprintf(stdout, "\n");
-			//error_message(READ_ERROR);
 		}
 		else
 		{
@@ -632,6 +636,11 @@ status_t set_command(environment_t *environment, command_t *command)
 		return set_verbose_command(environment, command);
 	}
 
+	if (strcmp(command->arguments[1], "prompt") == 0)
+	{
+		return set_prompt_command(environment, command);
+	}
+
 	return INVALID_VAR;
 }
 
@@ -688,6 +697,35 @@ status_t set_verbose_command(environment_t *environment, command_t *command)
 	}
 
 	return FORMAT_ERROR;
+}
+
+status_t set_prompt_command(environment_t *environment, command_t *command)
+{
+	//one for "set", one for "prompt", one for prompt, one for NULL pointer
+	if (command->argc < 4)
+	{
+		return ARGS_ERROR;
+	}
+
+	if (command->arguments[2][0] != '"')
+	{
+		return FORMAT_ERROR;
+	}
+	char *prompt_start = command->arguments[2] + 1;
+	size_t prompt_length = strlen(prompt_start);
+	//prompt must be at least one character (so one for ", one for character, one for ")
+	//must also end in "
+	if (prompt_length < 3 || prompt_start[prompt_length - 1] != '"')
+	{
+		return FORK_ERROR;
+	}
+
+	prompt_length--;
+	prompt_start[prompt_length] = '\0';
+
+	string_assign_from_char_array(environment->prompt, prompt_start);
+
+	return SUCCESS;
 }
 
 status_t convert(char *s, size_t *value)
