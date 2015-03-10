@@ -75,5 +75,14 @@ to finish. As noted in the alias section, pipes do not currently work with alias
 #Change Directory
 This is handled by the cd\_command function in src/osh.c
 
+#Set Prompt
+This is handled by the set\_command and set\_prompt functions in src/osh.c. The format of such a
+command is:
+
+	set prompt "[new prompt]"
+
+where the quotes must be included and [new prompt] is, as should be obvious, the new prompt. Note
+that empty prompts are allowed.
+
 Please refer to the function names and the JavaDoc-style function and struct comments to further
 refine where to look, given these bases.

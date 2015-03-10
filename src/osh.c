@@ -713,11 +713,11 @@ status_t set_prompt_command(environment_t *environment, command_t *command)
 	}
 	char *prompt_start = command->arguments[2] + 1;
 	size_t prompt_length = strlen(prompt_start);
-	//prompt must be at least one character (so one for ", one for character, one for ")
+	//new prompt must be at least ""
 	//must also end in "
-	if (prompt_length < 3 || prompt_start[prompt_length - 1] != '"')
+	if (prompt_length < 1 || prompt_start[prompt_length - 1] != '"')
 	{
-		return FORK_ERROR;
+		return FORMAT_ERROR;
 	}
 
 	prompt_length--;
