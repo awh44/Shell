@@ -226,7 +226,7 @@ void initialize_shell(environment_t *environment)
 unsigned short eval_print(char *line, size_t chars_read, environment_t *environment)
 {
 	//user wants to exit, return that indication to caller
-	if (strcmp(line, "exit\n") == 0)
+	if (strcmp(line, "exit\n") == 0 || strcmp(line, "quit\n") == 0)
 	{
 		return 0;
 	} 
